@@ -1,47 +1,112 @@
 /// <reference path="compat.ts" />
 
-var locationlib = new LocationLib();
-var hostParams = location.href.split("#")[0];
-var PLocation = null;
-var openid = "";
-var loclist = null;
-var resfloor = {
-  name: null,
-  status: 1, //等同参数code
-  time: null,
-  count: 0
-};
-var resPos = {
-  x: 0.0,
-  y: 0.0,
-  floor: 0,
-  count: 0
-};
-var gpsPosition = {
-  latitude: null,
-  longitude: null,
-  speed: null,
-  accuracy: null,
-  count: 0
-}
-var gpsPositionPro = {
-  latitude: null,
-  longitude: null
-}
-var GPSTimer = null;
-var InitPosArry = [],
-  InitPosStatus = false,
-  recentTime = 0;
-  /**语音播报的地方 实时定位时 */
-  var curEndX,curEndY,curEndPath = {
+var PLocationStatus = {
+  PLocation : null,
+  openId : "",
+  loclist : null,
+  resfloor : {
+    name: null,
+    status: 1, //等同参数code
+    time: null,
+    count: 0
+  },
+  resPos : {
+    x: 0.0,
+    y: 0.0,
+    floor: 0,
+    count: 0
+  },
+  gpsPosition : {
+    latitude: null,
+    longitude: null,
+    speed: null,
+    accuracy: null,
+    count: 0
+  },
+  gpsPositionPro : {
+    latitude: null,
+    longitude: null
+  },
+  GPSaccuracy : {
+    accuracy:null,
+    count:0
+  },
+  GPSTimer : null,
+  InitPosArry : [],
+  InitPosStatus : false,
+  recentTime : 0,
+  curEndX : null,
+  curEndY : null,
+  curEndPath : {
     num:null,
     status:true
-  };
+  },
+  nstepLLL:0,
+  OutdoorStatus : false,  ///定位判断是否在室外
+  IndoorStatus : true,  ///定位判断是否进入室内定位状态
+  resscene : "",
+  ff: null,
+  voiceFLag : true,
+  endX : null,
+  endY : null,
+  PosTime : null,
+  posFault : false,
+  bleOn : null,
+  CentrePoint : new Vector3(112.53005, 0.0, 37.7573), ///体育馆的中心点
+  rangeIn : false,  ///是否启动排除方案（刨去需要蓝牙定位的地方）
+  GDmap : null, ///高德地图 容器
+  geoLocation : null, ///高德地图 定位返回值
+  shili : {
+    "beacons": [{
+      major: 10008,
+      minor: 57686,
+      uuid: "FDA50693-A4E2-4FB1-AFCF-C6EB07647825",
+      accuracy: "0.235344",
+      rssi: "-66",
+      proximity: "1",
+      heading: "288.1355"
+    }]
+  },
+  GPSAcount : 0,
+  currentTime:"",
+  curStep : {
+    count: 0,
+    status: false
+  },
+  nowLine : null,
+  orLine : [],
+  yawAngle : 0,
+  curWayStart : null,
+  mnAngle : null,
+  posList : [], //调试用 记录传入点
+  StepMock: function(){},
+  step : 1,
+  nearistArr : [],
+  lat : 0,
+  last_lat : 0,
+  lng : 0,
+  last_lng : 0,
+  alt : 0,
+  last_alt : 0,
+  gpsTime : null,
+  last_gpsTime : null,
+  dataLngLatAccuracy : 0,
+  dataAltAccuracy : 0,
+  angle : 0,
+  speed : 0,
+  eqCount: 0,
+  tempCount : 0,
+  rangeCount : 0,
+  disableCount : 0,
+};
+/**GPS参数申明 */
 
-/**暂时不用的wxconfig方法 */
+var locationlib = new LocationLib();
+
+  /**暂时不用的wxconfig方法 */
 function initParam() {
   var host = window.location.host;
-  var currentUrl = "/h5/weixin/sign.php?url=" + encodeURIComponent(hostParams);
+  var currentUrl = "/h5/weixin/sign.php?url=" + encodeURIComponent(SystemStatus.hostParams);
   $.ajax({
     type: "get",
     async: true,
@@ -88,12 +153,7 @@ function initParam() {
   });
 }
 
-var openId = "";
-var GPSaccuracy = {
-  accuracy:null,
-  count:0
-};
-var nstepLLL=0;
+
 /** 用户点击链接触发登录*/
 function getCode(code) {
   /**后台微信登录地址 */
@@ -102,15 +162,14 @@ function getCode(code) {
   $.ajax({
     url: openidURL,
     success: function (data) {
-      openid = JSON.parse(data).openid;
-      console.info(openid);
-      openId = openid;
+      PLocationStatus.openId = JSON.parse(data).openid;
+      console.info(PLocationStatus.openId);
 
-      if (openid) {
-        if (!loclist) {
+      if (PLocationStatus.openId) {
+        if (!PLocationStatus.loclist) {
           getLocList();
         }
-        locationlib.locationInit("RFaUJsuCZVYMTPbbEY5z", "sxtyzx", openid, function (x, y, floorId, code) {
+        locationlib.locationInit("RFaUJsuCZVYMTPbbEY5z", "sxtyzx", PLocationStatus.openId, function (x, y, floorId, code) {
           var mytime = new Date().getTime();
           getLocation(x, y, floorId, code, mytime);
         });
@@ -119,23 +178,6 @@ function getCode(code) {
   });
 }
 
-function locationTest() {
-  /**模拟蓝牙信号 模拟init里的回调函数 */
-  !Posfault && (Posfault = true, NNavigation.EnableLocate(true), LockScene(), $(".lockScene").show(), showMockBtn());
-  setInterval(function () {
-    var mytime = new Date().getTime();
-    getLocation(1110, 360.862 + nstepLLL * 2, 2, 0, mytime);
-    //NNavigation.UpdateLocation(1, 1, new Vector3(nstepLLL, 0.0, nstepLLL)); //外景的workid与floorid始终为0
-  
-  PLocation = {
-    Work: 0,
-    Layer: 0,
-    Position: new Vector3(nstepLLL, 0.0, nstepLLL)
-  };
-  GLOBAL.PLocation = PLocation;
-  nstepLLL++;
-  }, 1000);
-}
 
 wx.ready(function () {
   // config信息验证后会执行ready方法，所有接口调用都必须在config接口获得结果之后，config是一个客户端的异步操作，
@@ -155,14 +197,14 @@ wx.ready(function () {
           }
         );
         setTimeout(() => {
-          IndoorStatus = false;
+          PLocationStatus.IndoorStatus = false;
         }, 2000);
       } else if (result.indexOf("system unsupported") != -1) {
         alert("您的系统不支持此服务。");
       } else {
         setTimeout(() => {
-          if (!Posfault)
-            IndoorStatus = false;
+          if (!PLocationStatus.posFault)
+            PLocationStatus.IndoorStatus = false;
         }, 5000);
       }
     }
@@ -182,7 +224,7 @@ wx.ready(function () {
       }
       locationlib.bleLocation(argv.beacons);
       // console.log("onsearch ing2");
-      !Posfault && (Posfault = true, NNavigation.EnableLocate(true), NNavigation.g_pActiveList.length <= 0 && LockScene(), $(".lockScene").show(), showMockBtn());
+      !PLocationStatus.posFault && (PLocationStatus.posFault = true, NNavigation.EnableLocate(true), NNavigation.g_pActiveList.length <= 0 && LockScene(), $(".lockScene").show(), ShowMockBtn());
       /**传递到和盛华提供接口 */
       $.post("http://api.heshenghua.net/rpc/beancons/setBeancons", {
         'beacons': JSON.stringify(argv.beacons),
@@ -220,59 +262,32 @@ wx.ready(function () {
       };
     } else if (res.state == "off") {
       //开启定位后关闭，需要恢复为模拟导航的配置
-      PLocation = null;
+      PLocationStatus.PLocation = null;
       $(".start_input input").val("");
-      D("未能获取蓝牙信息");
+      CenterToastShow("未能获取蓝牙信息");
       NNavigation.EnableLocate(false);
-      Posfault = false;
-      hideMockBtn();
+      PLocationStatus.posFault = false;
+      HideMockBtn();
     }
   });
   if (GLOBAL.GpsConfig.launch) {
     // InitGDMap();
     getGpsLocationGeo();
     console.log("getGPS start");
-    // GPSTimer = setInterval(getGpsLocation, 1000);
-    // let gpsParam = GLOBAL.GpsConfig.config;
-    // let gpscoordArry = Object.keys(gpsParam).map(function (i) {
-    //   return gpsParam[i]
-    // });
-    // let maxlongitude = gpscoordArry[0][0],
-    //   minlongitude = gpscoordArry[0][0],
-    //   maxlatitude = gpscoordArry[0][1],
-    //   minlatitude = gpscoordArry[0][1];
-    // for (i = 1; i < 4; i++) {
-    //   if (gpscoordArry[i][0] < minlongitude) {
-    //     minlongitude = gpscoordArry[i][0];
-    //   } else {
-    //     maxlongitude = gpscoordArry[i][0];
-    //   }
-    //   if (gpscoordArry[i][1] < minlatitude) {
-    //     minlatitude = gpscoordArry[i][1];
-    //   } else {
-    //     maxlatitude = gpscoordArry[i][1];
-    //   }
-    // }
     gpscpArry = new Vector3(112.52847,0.0,37.75644251);
-    //   maxlongitude,
-    //   minlongitude,
-    //   maxlatitude,
-    //   minlatitude
-    // };
-    // console.log(gpscpArry);
   }
 });
 
 function getRelLoc(x, y, floor, nWork) {
   var floorId = floor - 1;
-  if (loclist) {
+  if (PLocationStatus.loclist) {
     var relX = 0,
       relY = 0,
-      centX = loclist[floorId].centX,
-      centY = loclist[floorId].centY,
-      offsetX = loclist[floorId].offsetX,
-      offsetY = loclist[floorId].offsetY,
-      unit = loclist[floorId].unit,
+      centX = PLocationStatus.loclist[floorId].centX,
+      centY = PLocationStatus.loclist[floorId].centY,
+      offsetX = PLocationStatus.loclist[floorId].offsetX,
+      offsetY = PLocationStatus.loclist[floorId].offsetY,
+      unit = PLocationStatus.loclist[floorId].unit,
       relLoc = [],
       Lx = x,
       Ly = y;
@@ -280,40 +295,20 @@ function getRelLoc(x, y, floor, nWork) {
     relX = (Lx - centX) * unit + offsetX;
     relY = (Ly - centY) * unit + offsetY;
     relLoc = [relX, relY];
-    /**连续的点相距5米以上不传值 */
-    // if (resPos.x != 0.0 && resPos.y != 0.0 && resPos.floor == floor) {
-    //   if (
-    //     Math.sqrt(Math.pow(relX - resPos.x, 2) + Math.pow(relY - resPos.y, 2)) <
-    //     5 + resPos.count * 2 ||
-    //     resPos.count > 5
-    //   ) {
-    //     NNavigation.UpdateLocation(nWork, floorId, new Vector3(relX, 0.0, relY));
-    //     resPos.x = relX;
-    //     resPos.y = relY;
-    //     resPos.floor = floor;
-    //   } else {
-    //     resPos.count++;
-    //   }
-    // } else {
     let curPonit = new  Vector3(relX, 0.0, relY);
     //$("title").text(nWork+","+floorId+","+relX+","+relY);
     NNavigation.UpdateLocation(nWork, floorId, {x:relX,y:0.0,z:relY});
-    //   resPos.x = relX;
-    //   resPos.y = relY;
-    //   resPos.floor = floor;
-    // }
-    // if (GLOBAL.pathLayer.length > 0 && floorId == GLOBAL.pathLayer[GLOBAL.pathLayer.length - 1]) {
       if (NNavigation.g_pActiveList.length > 0 && GLOBAL.Navigating){
-      // $("title").text(curEndPath.num+","+curEndX+','+curEndY);
-      if (!curEndX&&!curEndY||curEndPath.num!=NNavigation.g_pActiveList[0].m_nCurPath){
+      // $("title").text(PLocationStatus.curEndPath.num+","+PLocationStatus.curEndX+','+PLocationStatus.curEndY);
+      if (!PLocationStatus.curEndX&&!PLocationStatus.curEndY||PLocationStatus.curEndPath.num!=NNavigation.g_pActiveList[0].m_nCurPath){
         let Nav;
         ( Nav =  NNavigation.g_pActiveList[0],
-          curEndPath.num = Nav.m_nCurPath,
-          curEndPath.status = false,
-          curEndX = Nav.m_aPath[Nav.m_nCurPath].m_aPath[Nav.m_aPath[Nav.m_nCurPath].m_aPath.length-1].x,
-          curEndY = Nav.m_aPath[Nav.m_nCurPath].m_aPath[Nav.m_aPath[Nav.m_nCurPath].m_aPath.length-1].z
+          PLocationStatus.curEndPath.num = Nav.m_nCurPath,
+          PLocationStatus.curEndPath.status = false,
+          PLocationStatus.curEndX = Nav.m_aPath[Nav.m_nCurPath].m_aPath[Nav.m_aPath[Nav.m_nCurPath].m_aPath.length-1].x,
+          PLocationStatus.curEndY = Nav.m_aPath[Nav.m_nCurPath].m_aPath[Nav.m_aPath[Nav.m_nCurPath].m_aPath.length-1].z
         );
-      } else if (curEndPath.num==NNavigation.g_pActiveList[0].m_nCurPath&&!curEndPath.status){
+      } else if (PLocationStatus.curEndPath.num==NNavigation.g_pActiveList[0].m_nCurPath&&!PLocationStatus.curEndPath.status){
         if (NNavigation.g_pActiveList[0].m_nCurPath >= NNavigation.g_pActiveList[0].m_aPath.length - 1) {
           switch(Engine.g_pInstance.pPath[Engine.g_pInstance.pPath.length - 1]
             .m_pEndPoint.m_mLandmark.Object.m_pName[0]){
@@ -350,25 +345,20 @@ function getRelLoc(x, y, floor, nWork) {
         }
       }
     }
-    // }
 
     /**蓝牙定位储存当前位置点信息（开启蓝牙和关闭蓝牙还是需要添加判断） */
-    PLocation = {
+    PLocationStatus.PLocation = {
       Work: nWork,
       Layer: floorId,
       Position: curPonit
     };
-    GLOBAL.PLocation = PLocation;
-    // if (MiaokitDC.DC.m_nCurWork == 0) {
-    //   SwitchScene("体育场");
-    // }
+    GLOBAL.PLocation = PLocationStatus.PLocation;
   } else {
     getLocList();
     console.log("undefined loclist");
   }
 }
-var OutdoorStatus = false;
-var IndoorStatus = true;
+
 /**播放动画 不自动结束 */
 function c2 (e) {
   console.info("播放动画：" + e);
@@ -403,33 +393,33 @@ function getLocation(initX, initY, floorId, code, time) {
     if (NNavigation.g_pActiveList.length>0&&NNavigation.g_pActiveList[0].m_aPath[0].m_pLayerName=="5F"&&
       NNavigation.g_pActiveList[0].m_aPath[NNavigation.g_pActiveList[0].m_aPath.length-1].m_pLayerName=="室外"&&
       floorId==2) {
-      IndoorStatus&&!GPSTimer && (getGpsLocationGeo());
-      IndoorStatus = false;
+      PLocationStatus.IndoorStatus&&!PLocationStatus.GPSTimer && (getGpsLocationGeo());
+      PLocationStatus.IndoorStatus = false;
     } else{
-      resfloor.time = time;
-      IndoorStatus = true;
-      GPSTimer && (navigator.geolocation.clearWatch(GPSTimer),
+      PLocationStatus.resfloor.time = time;
+      PLocationStatus.IndoorStatus = true;
+      PLocationStatus.GPSTimer && (navigator.geolocation.clearWatch(PLocationStatus.GPSTimer),
         // console.log("cleargpstimer in onsearch"),
-        GPSTimer = null, checkBLE());
+        PLocationStatus.GPSTimer = null, checkBLE());
       getRelLoc(initX, initY, floor, 1);
-      if (resfloor.status) {
-        resfloor.status = 0;
-        hideMsg();
+      if (PLocationStatus.resfloor.status) {
+        PLocationStatus.resfloor.status = 0;
+        HideMsg();
       }
     }
   } else {
     let interval = 8000;
     /**看情况 有导航和无导航，导航是否下一楼是室外还是啥，给不同的无信号时间，或者检测已经在区域外 */
-    if ((new Date().getTime() - resfloor.time > interval) && !resfloor.status) {
+    if ((new Date().getTime() - PLocationStatus.resfloor.time > interval) && !PLocationStatus.resfloor.status) {
       $("#msgBox img").attr("src","images/loading.gif");
-      showMsg("", 5000);
-      resfloor.status = 1;
-      resfloor.time = time;
+      ShowMsg("", 5000);
+      PLocationStatus.resfloor.status = 1;
+      PLocationStatus.resfloor.time = time;
       if (NNavigation.g_pActiveList.length>0&&NNavigation.g_pActiveList[0].m_aPath[NNavigation.g_pActiveList[0].m_aPath.length-1].m_pLayerName=="室外") {
-        IndoorStatus&&!GPSTimer && (getGpsLocationGeo());
-        IndoorStatus = false;
+        PLocationStatus.IndoorStatus&&!PLocationStatus.GPSTimer && (getGpsLocationGeo());
+        PLocationStatus.IndoorStatus = false;
       }
-    } else if (!GPSTimer&&IndoorStatus) {
+    } else if (!PLocationStatus.GPSTimer&&PLocationStatus.IndoorStatus) {
       getRelLoc(initX, initY, floor, 1);
     }
   }
@@ -437,7 +427,7 @@ function getLocation(initX, initY, floorId, code, time) {
 /**通过接口获取位置信息 */
 function getLocationOld() {
   $.ajax({
-    url: "https://indoor.yunweizhi.net:3000/getjspos?mapId=" + "ychospital" + "&openId=" + openid,
+    url: "https://indoor.yunweizhi.net:3000/getjspos?mapId=" + "ychospital" + "&openId=" + PLocationStatus.openId,
     success: function (res) {
       var location = JSON.parse(res).data;
       if (location.code == 0) {
@@ -454,11 +444,7 @@ function getLocationOld() {
  * type分别213
  */
 function calcDistance(x, y, type, faraway = 15) {
-  // let a = x - endX;
-  // a = a * a;
-  // let b = y - endY;
-  // b = b * b;
-  let EndPOI = new Vector3(curEndX,0.0,curEndY);
+  let EndPOI = new Vector3(PLocationStatus.curEndX,0.0,PLocationStatus.curEndY);
   let curPonit = new Vector3(x,0.0,y);
   let distance = Vector3.Distance(EndPOI,curPonit);
   // $("title").text(distance+","+type);
@@ -508,7 +494,7 @@ function calcDistance(x, y, type, faraway = 15) {
         break;
       case 5:
         /**终点播报 */
-        D(
+        CenterToastShow(
           "到达目的地" +
           Engine.g_pInstance.pPath[Engine.g_pInstance.pPath.length - 1]
           .m_pEndPoint.m_mLandmark.Object.m_pName,
@@ -523,10 +509,8 @@ function calcDistance(x, y, type, faraway = 15) {
       default:
         return true;
     }
-    // endX = null;
-    // endY = null;
     $(".Info-Img-Box img").attr("src","images/ex.png");
-    curEndPath.status = true;
+    PLocationStatus.curEndPath.status = true;
     }
 }
 
@@ -534,42 +518,35 @@ function calcDistance(x, y, type, faraway = 15) {
 function floorCheck(initX, initY, floor, time) {
   let date = time;
   if (NNavigation.g_pActiveList.length == 0) {
-    if (resfloor.name) {
-      if (resfloor.name != floor) {
-        if (date - resfloor.time > 2000) {
+    if (PLocationStatus.resfloor.name) {
+      if (PLocationStatus.resfloor.name != floor) {
+        if (date - PLocationStatus.resfloor.time > 2000) {
           getRelLoc(initX, initY, floor, 1);
-          resfloor.name = floor;
-          resfloor.time = date;
+          PLocationStatus.resfloor.name = floor;
+          PLocationStatus.resfloor.time = date;
         }
       } else {
         getRelLoc(initX, initY, floor, 1);
-        resfloor.time = date;
+        PLocationStatus.resfloor.time = date;
       }
     } else {
       getRelLoc(initX, initY, floor, 1);
-      resfloor.name = floor;
-      resfloor.time = date;
+      PLocationStatus.resfloor.name = floor;
+      PLocationStatus.resfloor.time = date;
     }
   } else {
-    resfloor.time = time;
+    PLocationStatus.resfloor.time = time;
     getRelLoc(initX, initY, floor, 1);
   }
 }
-var resscene = "";
-let ff;
-var voiceFLag = true,
-  endX = null,
-  endY = null,
-  PosTime,
-  Posfault = false,
-  bleOn;
+
 
 /**定时检测是否能够定位成功 */
 function buletoothOn() {
   var curTime = Date.parse((new Date()).toString());
-  if (curTime - PosTime > 5000 && Posfault == true) {
+  if (curTime - PLocationStatus.PosTime > 5000 && PLocationStatus.posFault == true) {
     NNavigation.EnableLocate(false);
-    Posfault = false;
+    PLocationStatus.posFault = false;
     if ($(".history-rollback-wrapper").is(":hidden")) {
       $(".lockScene").hide();
       LockCameraToPath(0);
@@ -582,8 +559,8 @@ function getLocList() {
   $.ajax({
     url: "../api/info/getBluetooth.php",
     success: function (data) {
-      loclist = JSON.parse(data);
-      for (let loc of loclist) {
+      PLocationStatus.loclist = JSON.parse(data);
+      for (let loc of PLocationStatus.loclist) {
         for (var i in loc) {
           loc[i] = parseFloat(loc[i]);
         }
@@ -591,42 +568,34 @@ function getLocList() {
     }
   });
 }
-/**体育馆的中心坐标，以其画圆排除 */
-let CentrePoint = new Vector3(112.53005, 0.0, 37.7573);
-/**是否启动排除方案 */
-var rangeIn = false;
+
 /**原生watch接口 */
 function getGpsLocationGeo () {
   //获取设备信息
-  GPSTimer=navigator.geolocation.watchPosition(
+  PLocationStatus.GPSTimer=navigator.geolocation.watchPosition(
     function (p) {
         //ShowObjProperty(p);
-        lat = p.coords.latitude || 0;
-        lng = p.coords.longitude || 0;
-        alt = p.coords.altitude || 0;
-        gpsTime =new Date().getTime();
-        dataLngLatAccuracy = p.coords.accuracy || 0;
-        dataAltAccuracy = p.coords.altitudeAccuracy || 0
-        angle = p.coords.heading || 0;
-        speed = p.coords.speed || 0;
+        PLocationStatus.lat = p.coords.latitude || 0;
+        PLocationStatus.lng = p.coords.longitude || 0;
+        PLocationStatus.alt = p.coords.altitude || 0;
+        PLocationStatus.gpsTime =new Date().getTime();
+        PLocationStatus.dataLngLatAccuracy = p.coords.accuracy || 0;
+        PLocationStatus.dataAltAccuracy = p.coords.altitudeAccuracy || 0
+        PLocationStatus.angle = p.coords.heading || 0;
+        PLocationStatus.speed = p.coords.speed || 0;
         // console.log(gpsTime);
         //暂时只判断经纬度海拔变化值是否变化
-        if (!IndoorStatus&&(!last_gpsTime||gpsTime - last_gpsTime>1000)){
+        if (!PLocationStatus.IndoorStatus&&(!PLocationStatus.last_gpsTime||PLocationStatus.gpsTime - PLocationStatus.last_gpsTime>1000)){
           // console.log("获取GPS一次");
-          if (last_lat != lat || last_lng != lng || last_alt != alt) {//|| last_gpsTime != gpsTime
-              eqcount = 0;
-              gpsPosition.latitude = lat;
-              gpsPosition.longitude = lng;
-              gpsPosition.accuracy = dataLngLatAccuracy;
-              $("title").text(alt+","+lng + "," + lat + "," + dataLngLatAccuracy);
-              last_gpsTime = gpsTime;
+          if (PLocationStatus.last_lat != PLocationStatus.lat || PLocationStatus.last_lng != PLocationStatus.lng || PLocationStatus.last_alt != PLocationStatus.alt) {//|| last_gpsTime != gpsTime
+              PLocationStatus.eqCount = 0;
+              PLocationStatus.gpsPosition.latitude = PLocationStatus.lat;
+              PLocationStatus.gpsPosition.longitude = PLocationStatus.lng;
+              PLocationStatus.gpsPosition.accuracy = PLocationStatus.dataLngLatAccuracy;
+              PLocationStatus.last_gpsTime = PLocationStatus.gpsTime;
               /**当前位置点GPS坐标vector3对象 */
-              let curpointGPS = new Vector3(lng,0.0,lat);
-              if (
-                Vector3.Distance(gpscpArry,curpointGPS)<=0.006527
-                //gpsPosition.latitude <= gpscpArry.maxlatitude && gpsPosition.latitude >= gpscpArry.minlatitude && gpsPosition.longitude <= gpscpArry.maxlongitude && gpsPosition.longitude >= gpscpArry.minlongitude
-                //NNavigation.g_pActiveList.length<=0
-              ) {
+              let curpointGPS = new Vector3(PLocationStatus.lng,0.0,PLocationStatus.lat);
+              if (Vector3.Distance(gpscpArry,curpointGPS)<=0.006527) {
                 
                 if (0) {
                   // OutdoorStatus = true;
@@ -638,26 +607,24 @@ function getGpsLocationGeo () {
                   //   rangeIn = false;
                   // }
                 }else {
-                  if (
-                    gpsPosition.accuracy<=30){
-                      $("title").text("okgeo:"+alt+"," + lng + "," + lat + "," + dataLngLatAccuracy);
-                !Posfault && (Posfault = true, NNavigation.EnableLocate(true), NNavigation.g_pActiveList.length <= 0 && LockScene(), $(".lockScene").show(), showMockBtn());
-                setgpsLocation(gpsPosition);
+                  if (PLocationStatus.gpsPosition.accuracy<=30){
+                !PLocationStatus.posFault && (PLocationStatus.posFault = true, NNavigation.EnableLocate(true), NNavigation.g_pActiveList.length <= 0 && LockScene(), $(".lockScene").show(), ShowMockBtn());
+                setgpsLocation(PLocationStatus.gpsPosition);
               } else{
-                OutdoorStatus&&PLocation&&speed>1&&StepMock();
+                PLocationStatus.OutdoorStatus&&PLocationStatus.PLocation&&PLocationStatus.speed>1&&PLocationStatus.StepMock();
               }
             }
             }
           }else {
-            if (PLocation&&speed>1){
-              eqcount++
-              if (eqcount<8){
-                StepMock();
+            if (PLocationStatus.PLocation&&PLocationStatus.speed>1){
+              PLocationStatus.eqCount++
+              if (PLocationStatus.eqCount<8){
+                PLocationStatus.StepMock();
               }
             }
           }
-        } else if (new Date().getTime() - resfloor.time>1000){
-          IndoorStatus = false;
+        } else if (new Date().getTime() - PLocationStatus.resfloor.time>1000){
+          PLocationStatus.IndoorStatus = false;
         }
     },
     function (e) {
@@ -674,36 +641,32 @@ function getGpsLocation() {
   wx.getLocation({
     type: 'gcj02', // 默认为wgs84的gps坐标，如果要返回直接给openLocation用的火星坐标，可传入'gcj02'
     success: function (res) {
-    if(gpsPosition.longitude!=res.longitude&&gpsPosition.latitude!=res.latitude){
-      eqcount = 0;
-      gpsPosition.longitude = res.longitude; // 经度，浮点数，范围为180 ~ -180。
-      gpsPosition.latitude = res.latitude; // 纬度，浮点数，范围为90 ~ -90
-      // gpsPosition.longitude = 110.28852; // 经度，浮点数，范围为180 ~ -180。
-      // gpsPosition.latitude = 25.273695; // 纬度，浮点数，范围为90 ~ -90
-      gpsPosition.speed = res.speed; // 速度，以米/每秒计
-      gpsPosition.accuracy = res.accuracy; // 位置精度
+    if(PLocationStatus.gpsPosition.longitude!=res.longitude&&PLocationStatus.gpsPosition.latitude!=res.latitude){
+      PLocationStatus.eqCount = 0;
+      PLocationStatus.gpsPosition.longitude = res.longitude; // 经度，浮点数，范围为180 ~ -180。
+      PLocationStatus.gpsPosition.latitude = res.latitude; // 纬度，浮点数，范围为90 ~ -90
+      // PLocationStatus.gpsPosition.longitude = 110.28852; // 经度，浮点数，范围为180 ~ -180。
+      // PLocationStatus.gpsPosition.latitude = 25.273695; // 纬度，浮点数，范围为90 ~ -90
+      PLocationStatus.gpsPosition.speed = res.speed; // 速度，以米/每秒计
+      PLocationStatus.gpsPosition.accuracy = res.accuracy; // 位置精度
       // $("title").text(res.longitude + "," + res.latitude + "," + res.accuracy);
       if (res.accuracy>30){
-        StepMock();
+        PLocationStatus.StepMock();
         return false
       }
-      if (
-        // 1
-        //gpsPosition.accuracy<=90&&
-        gpsPosition.latitude <= gpscpArry.maxlatitude && gpsPosition.latitude >= gpscpArry.minlatitude && gpsPosition.longitude <= gpscpArry.maxlongitude && gpsPosition.longitude >= gpscpArry.minlongitude
-        &&NNavigation.g_pActiveList.length<=0
-      ) {
+      if (PLocationStatus.gpsPosition.latitude <= gpscpArry.maxlatitude && PLocationStatus.gpsPosition.latitude >= gpscpArry.minlatitude && PLocationStatus.gpsPosition.longitude <= gpscpArry.maxlongitude && PLocationStatus.gpsPosition.longitude >= gpscpArry.minlongitude
+        &&NNavigation.g_pActiveList.length<=0) {
         // $("title").text("okwx:" + res.longitude + "," + res.latitude + "," + res.accuracy);
-        !Posfault && (Posfault = true, NNavigation.EnableLocate(true), $(".lockScene").show()) && NNavigation.g_pActiveList.length == 0 && LockScene();
-        setgpsLocation(gpsPosition);
+        !PLocationStatus.posFault && (PLocationStatus.posFault = true, NNavigation.EnableLocate(true), $(".lockScene").show()) && NNavigation.g_pActiveList.length == 0 && LockScene();
+        setgpsLocation(PLocationStatus.gpsPosition);
       } else {
         return false;
       }
     } else {
-      if (PLocation){
-        eqcount++
-        if (eqcount<8){
-          StepMock();
+      if (PLocationStatus.PLocation){
+        PLocationStatus.eqCount++
+        if (PLocationStatus.eqCount<8){
+          PLocationStatus.StepMock();
         }
       }
     }
@@ -711,14 +674,12 @@ function getGpsLocation() {
   });
 }
 
-var GDmap, geolocation;
-
 function InitGDMap() {
-  GDmap = new AMap.Map('GDcontainer', {
+  PLocationStatus.GDmap = new AMap.Map('GDcontainer', {
     resizeEnable: true
   });
   AMap.plugin('AMap.Geolocation', function () {
-    geolocation = new AMap.Geolocation({
+    PLocationStatus.geoLocation = new AMap.Geolocation({
       enableHighAccuracy: true, //是否使用高精度定位，默认:true
       timeout: 10000000, //超过10秒后停止定位，默认：5s
       convert: true, //自动偏移坐标，偏移后的坐标为高德坐标，默认：true
@@ -729,27 +690,16 @@ function InitGDMap() {
       zoomToAccuracy: false //定位成功后调整地图视野范围使定位位置及精度范围视野内可见，默认：false
 
     });
-    GDmap.addControl(geolocation);
+    PLocationStatus.GDmap.addControl(PLocationStatus.geoLocation);
 
   });
 }
 
-var shili = {
-  "beacons": [{
-    major: 10008,
-    minor: 57686,
-    uuid: "FDA50693-A4E2-4FB1-AFCF-C6EB07647825",
-    accuracy: "0.235344",
-    rssi: "-66",
-    proximity: "1",
-    heading: "288.1355"
-  }]
-}
-var GPSAcount = 0;
+
 /**使用高德api获得GPS坐标，做地图区域判断 */
 function getGpsLocationGD() {
   console.log("gaode GPS0");
-  geolocation.getCurrentPosition(function (status, res) {
+  PLocationStatus.geoLocation.getCurrentPosition(function (status, res) {
     // $.post("http://api.heshenghua.net/rpc/beancons/setBeancons", {
     //   'beancons': JSON.stringify(shili.beacons),
     //   // 'beancons': shili.beacons,
@@ -760,58 +710,58 @@ function getGpsLocationGD() {
     console.log("gaode GPS1");
     if (status == 'complete') {
       console.log("gaode GPS");
-      if (!PLocation||!gpsPosition.longitude||1){
-        eqcount = 0;
-        gpsPosition.longitude = res.position.lng; // 经度，浮点数，范围为180 ~ -180。
-        gpsPosition.latitude = res.position.lat; // 纬度，浮点数，范围为90 ~ -90
-        // gpsPosition.longitude = 110.28852; // 经度，浮点数，范围为180 ~ -180。
-        // gpsPosition.latitude = 25.273695; // 纬度，浮点数，范围为90 ~ -90
-        // gpsPosition.speed = res.speed; // 速度，以米/每秒计
-        gpsPosition.accuracy = res.accuracy; // 位置精度
+      if (!PLocationStatus.PLocation||!PLocationStatus.gpsPosition.longitude||1){
+        PLocationStatus.eqCount = 0;
+        PLocationStatus.gpsPosition.longitude = res.position.lng; // 经度，浮点数，范围为180 ~ -180。
+        PLocationStatus.gpsPosition.latitude = res.position.lat; // 纬度，浮点数，范围为90 ~ -90
+        // PLocationStatus.gpsPosition.longitude = 110.28852; // 经度，浮点数，范围为180 ~ -180。
+        // PLocationStatus.gpsPosition.latitude = 25.273695; // 纬度，浮点数，范围为90 ~ -90
+        // PLocationStatus.gpsPosition.speed = res.speed; // 速度，以米/每秒计
+        PLocationStatus.gpsPosition.accuracy = res.accuracy; // 位置精度
         // $("title").text(res.position.lng + "," + res.position.lat + "," + res.accuracy);
-        if (!GPSaccuracy.accuracy) {
-          GPSaccuracy.accuracy = gpsPosition.accuracy
-        } else if (gpsPosition.accuracy>GPSaccuracy.accuracy) {
-          if (GPSaccuracy.count>5){
-            GPSaccuracy.count = 0;
-            GPSaccuracy.accuracy = gpsPosition.accuracy;
+        if (!PLocationStatus.GPSaccuracy.accuracy) {
+          PLocationStatus.GPSaccuracy.accuracy = PLocationStatus.gpsPosition.accuracy
+        } else if (PLocationStatus.gpsPosition.accuracy>PLocationStatus.GPSaccuracy.accuracy) {
+          if (PLocationStatus.GPSaccuracy.count>5){
+            PLocationStatus.GPSaccuracy.count = 0;
+            PLocationStatus.GPSaccuracy.accuracy = PLocationStatus.gpsPosition.accuracy;
           } else {
-            GPSaccuracy.count++;
+            PLocationStatus.GPSaccuracy.count++;
             return false;
           }
         } else {
-          GPSaccuracy.count = 0;
+          PLocationStatus.GPSaccuracy.count = 0;
         }
-        if (GPSaccuracy.accuracy>90){
-          //navigator.geolocation.clearWatch(GPSTimer);
-          GPSTimer = setInterval(getGpsLocation,1000);
+        if (PLocationStatus.GPSaccuracy.accuracy>90){
+          //navigator.geolocation.clearWatch(PLocationStatus.GPSTimer);
+          PLocationStatus.GPSTimer = setInterval(getGpsLocation,1000);
           return false;
         }
         if (
           // 1
-          (gpsPosition.accuracy <= 30 || gpsPosition.accuracy <= GPSaccuracy) &&
-          gpsPosition.latitude <= gpscpArry.maxlatitude && gpsPosition.latitude >= gpscpArry.minlatitude && gpsPosition.longitude <= gpscpArry.maxlongitude && gpsPosition.longitude >= gpscpArry.minlongitude
+          (PLocationStatus.gpsPosition.accuracy <= 30 || PLocationStatus.gpsPosition.accuracy <= PLocationStatus.GPSaccuracy) &&
+          PLocationStatus.gpsPosition.latitude <= gpscpArry.maxlatitude && PLocationStatus.gpsPosition.latitude >= gpscpArry.minlatitude && PLocationStatus.gpsPosition.longitude <= gpscpArry.maxlongitude && PLocationStatus.gpsPosition.longitude >= gpscpArry.minlongitude
         ) {
             // $("title").text("okgd:" + res.position.lng + "," + res.position.lat + "," + res.accuracy);
-            if (!Posfault) {
-                Posfault = true;
+            if (!PLocationStatus.posFault) {
+                PLocationStatus.posFault = true;
                 NNavigation.EnableLocate(true);
                 $(".lockScene").show();
-                showMockBtn();
+                ShowMockBtn();
 
                 if (NNavigation.g_pActiveList.length == 0) {
                     LockScene();
                 }
             }
 
-            setgpsLocation(gpsPosition);
+            setgpsLocation(PLocationStatus.gpsPosition);
         } else {
             return false;
         }
       } else {
-        eqcount++;
-        if (PLocation&&eqcount<5){
-          StepMock();
+        PLocationStatus.eqCount++;
+        if (PLocationStatus.PLocation&&PLocationStatus.eqCount<5){
+          PLocationStatus.StepMock();
         }
       }
     } else {
@@ -819,11 +769,7 @@ function getGpsLocationGD() {
     }
   });
 }
-var rangeCount = 0;
-/**误差太大出现次数 */
-var disablecount = 0;
-/**GPS相同次数 */
-var eqcount = 0;
+
 /**获取GPS坐标，是否在体育馆范围内判断 */
 function RangeInGps() {
   wx.getLocation({
@@ -838,26 +784,25 @@ function RangeInGps() {
       g.x = res.longitude; // 经度，浮点数，范围为180 ~ -180。
       g.y = res.latitude; // 纬度，浮点数，范围为90 ~ -90
       /**画圆心判断 */
-      let CentrePoint = new Vector3(112.52985059057416, 0.0, 37.75731239593483);
-      if (Vector3.Distance(g, CentrePoint) < 0.001806) {
-        rangeCount = 0;
+      PLocationStatus.CentrePoint = new Vector3(112.52985059057416, 0.0, 37.75731239593483);
+      if (Vector3.Distance(g, PLocationStatus.CentrePoint) < 0.001806) {
+        PLocationStatus.rangeCount = 0;
         return false;
       } else {
-        if (rangeCount > 2) {
+        if (PLocationStatus.rangeCount > 2) {
           return true;
         } else {
-          rangeCount++;
+          PLocationStatus.rangeCount++;
           return false;
         }
       }
     }}
   });
 }
-var currentTime;
 function setgpsLocation(position) {
   if ($("#msgBox").is(":visible")) {
-    hideMsg();
-    D("已切换室外定位", 1000);
+    HideMsg();
+    CenterToastShow("已切换室外定位", 1000);
   }
   let rellongitude = 0.0,
     relatitude = 0.0;
@@ -868,16 +813,16 @@ function setgpsLocation(position) {
   position.latitude = relatitude;
   //FilterGPSPoi(position);
   if (NNavigation.g_pActiveList.length > 0 && GLOBAL.Navigating){
-    //$("title").text(curEndPath.num+","+curEndX+','+curEndY);
-    if (!curEndX&&!curEndY||curEndPath.num!=NNavigation.g_pActiveList[0].m_nCurPath){
+    //$("title").text(PLocationStatus.curEndPath.num+","+PLocationStatus.curEndX+','+PLocationStatus.curEndY);
+    if (!PLocationStatus.curEndX&&!PLocationStatus.curEndY||PLocationStatus.curEndPath.num!=NNavigation.g_pActiveList[0].m_nCurPath){
       let Nav;
       ( Nav =  NNavigation.g_pActiveList[0],
-        curEndPath.num = Nav.m_nCurPath,
-        curEndPath.status = false,
-        curEndX = Nav.m_aPath[Nav.m_nCurPath].m_aPath[Nav.m_aPath[Nav.m_nCurPath].m_aPath.length-1].x,
-        curEndY = Nav.m_aPath[Nav.m_nCurPath].m_aPath[Nav.m_aPath[Nav.m_nCurPath].m_aPath.length-1].z
+        PLocationStatus.curEndPath.num = Nav.m_nCurPath,
+        PLocationStatus.curEndPath.status = false,
+        PLocationStatus.curEndX = Nav.m_aPath[Nav.m_nCurPath].m_aPath[Nav.m_aPath[Nav.m_nCurPath].m_aPath.length-1].x,
+        PLocationStatus.curEndY = Nav.m_aPath[Nav.m_nCurPath].m_aPath[Nav.m_aPath[Nav.m_nCurPath].m_aPath.length-1].z
       );
-    } else if (curEndPath.num==NNavigation.g_pActiveList[0].m_nCurPath&&!curEndPath.status){
+    } else if (PLocationStatus.curEndPath.num==NNavigation.g_pActiveList[0].m_nCurPath&&!PLocationStatus.curEndPath.status){
       let dt = 60;
       if (NNavigation.g_pActiveList[0].m_nCurPath >= NNavigation.g_pActiveList[0].m_aPath.length - 1) {
         calcDistance(rellongitude, relatitude, 5, dt);
@@ -903,149 +848,12 @@ function setgpsLocation(position) {
   }
   NNavigation.UpdateLocation(0, 0, new Vector3(rellongitude, 0.0, relatitude)); //外景的workid与floorid始终为0
   
-  PLocation = {
+  PLocationStatus.PLocation = {
     Work: 0,
     Layer: 0,
     Position: new Vector3(rellongitude, 0.0, relatitude)
   };
-  GLOBAL.PLocation = PLocation;
-//   var canvas=document.getElementsByTagName('canvas')[0];
-//  var cxt=canvas.getContext("webgl2");
-//  cxt.beginPath();
-//  cxt.arc(PLocation.Position.x,PLocation.Position.z,50,0,360,false);
-//  cxt.fillStyle="red";//填充颜色,默认是黑色
-// cxt.fill();//画实心圆
-// cxt.closePath();
-  /**试图精准定位，然后数据量太大还不准 */
-  // if (InitPosArry.length < 1) {
-  //   NNavigation.UpdateLocation(0, 0, new Vector3(rellongitude, 0.0, relatitude)); //外景的workid与floorid始终为0
-  //   PLocation = {
-  //     Work: 0,
-  //     Layer: 0,
-  //     Position: new Vector3(rellongitude, 0.0, relatitude)
-  //   };
-  //   GLOBAL.PLocation = PLocation;
-  //   //addDeviceMotion();
-  //   recentTime = new Date().getTime();
-  //   InitPosArry.push({
-  //     x: rellongitude,
-  //     y: relatitude,
-  //     count: 0
-  //   });
-  // } else if (!InitPosStatus && InitPosArry.length < 30) {
-  //   let poi = PosToRoad(rellongitude, relatitude);
-  //   rellongitude = poi.x;
-  //   relatitude = poi.z;
-  //   let InitPos;
-  //   /**找个可靠的点 */
-  //   for (var i = InitPosArry.length - 1; i >= 0; i--) {
-  //     if (InitPosArry[i].count > 0) {
-  //       InitPos = InitPosArry[i];
-  //       break;
-  //     } else if (i == 0) {
-  //       InitPos = InitPosArry[InitPosArry.length - 1];
-  //     }
-  //   }
-  //   console.log("InitPos:", InitPos);
-  //   /**与上次定位点相差不过distance时，进行传递定位点 */
-  //   if (clacInitPos(rellongitude, relatitude, InitPos)) {
-  //     NNavigation.UpdateLocation(0, 0, new Vector3(rellongitude, 0.0, relatitude)); //外景的workid与floorid始终为0
-  //     PLocation = {
-  //       Work: 0,
-  //       Layer: 0,
-  //       Position: new Vector3(rellongitude, 0.0, relatitude)
-  //     };
-  //     GLOBAL.PLocation = PLocation;
-  //   }
-  //   /**寻找当前定位点相邻的点 */
-  //   for (let pos of InitPosArry) {
-  //     if (clacInitPos(rellongitude, relatitude, pos)) {
-  //       pos.count++;
-  //       console.log("rangein pos:", pos);
-  //       if (pos.count >= 3) {
-  //         InitPosStatus = true;
-  //         NNavigation.UpdateLocation(0, 0, new Vector3(pos.x, 0.0, pos.y)); //外景的workid与floorid始终为0
-  //         PLocation = {
-  //           Work: 0,
-  //           Layer: 0,
-  //           Position: new Vector3(pos.x, 0.0, pos.y)
-  //         };
-  //         GLOBAL.PLocation = PLocation;
-  //         return false;
-  //       }
-  //     }
-  //   }
-  //   InitPosArry.push({
-  //     x: rellongitude,
-  //     y: relatitude,
-  //     count: 0
-  //   });
-  //   /**确立起始点以后 */
-  // } else {
-  //   InitPosStatus = true;
-  //   /**这里开始就启用模拟策略
-  //    * 首先判定是否是走动的
-  //    * 是的话才计算是否和上个点在范围内
-  //    * 不在就模拟，在的话修正
-  //    */
-  //   if (NNavigation.g_pActiveList.length <= 0) {
-  //     if (curStep.status) {
-  //       let poi = PosToRoad(rellongitude, relatitude);
-  //       rellongitude = poi.x;
-  //       relatitude = poi.z;
-  //       if (clacInitPos(rellongitude, relatitude, PLocation.Position)) {
-  //         let distance, dif;
-  //         recentTime = new Date().getTime();
-  //         distance = Math.sqrt((rellongitude - PLocation.Position.x) * (rellongitude - PLocation.Position.x) + (relatitude - PLocation.Position.z) * (relatitude - PLocation.Position.z));
-  //         dif = correctDis(distance);
-  //         NNavigation.UpdateLocation(0, 0, new Vector3(PLocation.Position.x + dif.difX, 0.0, PLocation.Position.z + dif.difY)); //外景的workid与floorid始终为0
-  //         console.log("truestatus:", PLocation.Position.x, PLocation.Position.z + dif.difY);
-  //         PLocation = {
-  //           Work: 0,
-  //           Layer: 0,
-  //           Position: new Vector3(PLocation.Position.x + dif.difX, 0.0, PLocation.Position.z + dif.difY)
-  //         };
-  //         GLOBAL.PLocation = PLocation;
-  //       } else {
-  //         if (new Date().getTime() - recentTime < 5500) {
-  //           StepMock();
-  //         } else {
-  //           InitPosArry = [];
-  //         }
-  //       }
-  //     } else {
-  //       let poi = PosToRoad(rellongitude, relatitude);
-  //       rellongitude = poi.x;
-  //       relatitude = poi.z;
-  //       NNavigation.UpdateLocation(0, 0, new Vector3(rellongitude, 0.0, relatitude)); //外景的workid与floorid始终为0
-  //       PLocation = {
-  //         Work: 0,
-  //         Layer: 0,
-  //         Position: new Vector3(rellongitude, 0.0, relatitude)
-  //       };
-  //       GLOBAL.PLocation = PLocation;
-  //     }
-  //   } else {
-  //     //if (curStep.status) {
-  //     if (clacInitPos(rellongitude, relatitude, PLocation.Position) || position.accuracy <= 31) {
-  //       recentTime = new Date().getTime();
-  //       NNavigation.UpdateLocation(0, 0, new Vector3(rellongitude, 0.0, relatitude)); //外景的workid与floorid始终为0
-  //       PLocation = {
-  //         Work: 0,
-  //         Layer: 0,
-  //         Position: new Vector3(rellongitude, 0.0, relatitude)
-  //       };
-  //       GLOBAL.PLocation = PLocation;
-  //     } else {
-  //       if (new Date().getTime() - recentTime < 5500) {
-  //         StepMock();
-  //       } else {
-  //         InitPosArry = [];
-  //       }
-  //     }
-
-  //   }
-  // }
+  GLOBAL.PLocation = PLocationStatus.PLocation;
 }
 /**监听设备运动状态 */
 function addDeviceMotion() {
@@ -1079,9 +887,8 @@ function clacInitPos(x, y, InitPos) {
   }
 }
 
-var posList = [];//调试用 记录传入点
 /**模拟步进 */
-var StepMock = function () {
+PLocationStatus.StepMock = function () {
   /**怎么写
    * 最终--》NNavigation.update()
    * 得到两个的坐标值即可、
@@ -1090,59 +897,52 @@ var StepMock = function () {
   console.log("step mock");
   var difX = 0.0,
     difY = 0.0,
-    nAngle = linshi;
+    nAngle = PLocationStatus.yawAngle;
   while (nAngle > 360) {
     nAngle = nAngle - 360;
   }
     /**nnvigation */
     if (NNavigation.g_pActiveList.length>0){
     var Nav = NNavigation.g_pActiveList[0];
-    if (curWayStart===null){
-      curWayStart = Nav.m_nWayStart;
-      mnAngle = Vector3.AngleTo(NNavigation.g_pActiveList[0].m_aPath[Nav.m_nCurPath].m_aPath[Nav.m_nWayEnd],NNavigation.g_pActiveList[0].m_aPath[Nav.m_nCurPath].m_aPath[Nav.m_nWayStart])
-      console.log('angle',mnAngle);
-    } else if (mnAngle===0){
-      mnAngle = -Vector3.AngleTo(NNavigation.g_pActiveList[0].m_aPath[Nav.m_nCurPath].m_aPath[Nav.m_nWayEnd+1],NNavigation.g_pActiveList[0].m_aPath[Nav.m_nCurPath].m_aPath[Nav.m_nWayEnd])
-      console.log('angle',mnAngle);
+    if (PLocationStatus.curWayStart===null){
+      PLocationStatus.curWayStart = Nav.m_nWayStart;
+      PLocationStatus.mnAngle = Vector3.AngleTo(NNavigation.g_pActiveList[0].m_aPath[Nav.m_nCurPath].m_aPath[Nav.m_nWayEnd],NNavigation.g_pActiveList[0].m_aPath[Nav.m_nCurPath].m_aPath[Nav.m_nWayStart])
+    } else if (PLocationStatus.mnAngle===0){
+      PLocationStatus.mnAngle = -Vector3.AngleTo(NNavigation.g_pActiveList[0].m_aPath[Nav.m_nCurPath].m_aPath[Nav.m_nWayEnd+1],NNavigation.g_pActiveList[0].m_aPath[Nav.m_nCurPath].m_aPath[Nav.m_nWayEnd])
     }else{
-      if (Nav.m_nWayStart!=curWayStart){
-       mnAngle = -Vector3.AngleTo(NNavigation.g_pActiveList[0].m_aPath[Nav.m_nCurPath].m_aPath[Nav.m_nWayEnd],NNavigation.g_pActiveList[0].m_aPath[Nav.m_nCurPath].m_aPath[Nav.m_nWayStart])
-       console.log('angle',mnAngle);
+      if (Nav.m_nWayStart!=PLocationStatus.curWayStart){
+       PLocationStatus.mnAngle = -Vector3.AngleTo(NNavigation.g_pActiveList[0].m_aPath[Nav.m_nCurPath].m_aPath[Nav.m_nWayEnd],NNavigation.g_pActiveList[0].m_aPath[Nav.m_nCurPath].m_aPath[Nav.m_nWayStart])
       }
     } 
   } else {
     while (nAngle > 360) {
       nAngle = nAngle - 360;
     }
-    mnAngle = nAngle*0.017453293;
+    PLocationStatus.mnAngle = nAngle*0.017453293;
   }
   // while (nAngle > 360) {
   //   nAngle = nAngle - 360;
   // }
   // difX = Math.sin(0.017453293 * nAngle) * 1.8;
   // difY = Math.cos(0.017453293 * nAngle) * 1.8;
-  difX = Math.sin(mnAngle) * 2.8;
-  difY = Math.cos(mnAngle) * 2.8;
+  difX = Math.sin(PLocationStatus.mnAngle) * 2.8;
+  difY = Math.cos(PLocationStatus.mnAngle) * 2.8;
   if (!difX){
     difX = 0;
   }
   if (!difY)
     difY=0;
 
-  console.log("position",PLocation.Position);
-  NNavigation.UpdateLocation(0, 0, new Vector3(PLocation.Position.x+difX, 0.0, PLocation.Position.z+difY)); //外景的workid与floorid始终为0
+  console.log("position",PLocationStatus.PLocation.Position);
+  NNavigation.UpdateLocation(0, 0, new Vector3(PLocationStatus.PLocation.Position.x+difX, 0.0, PLocationStatus.PLocation.Position.z+difY)); //外景的workid与floorid始终为0
   NNavigation.g_pActiveList.length>0&&console.log(NNavigation.g_pActiveList[0].m_nWayStep,"step");
-  // posList.push(PLocation.Position);
-  // if (posList.length>30){
-  //   console.log(posList);
-  // }
-  return new Vector3(PLocation.Position.x+difX, 0.0, PLocation.Position.z+difY);
+  return new Vector3(PLocationStatus.PLocation.Position.x+difX, 0.0, PLocationStatus.PLocation.Position.z+difY);
 };
 
 function correctDis(distance=1) {
   var difX = 0.0,
     difY = 0.0,
-    nAngle = linshi;
+    nAngle = PLocationStatus.yawAngle;
   while (nAngle > 360) {
     nAngle = nAngle - 360;
   }
@@ -1153,15 +953,7 @@ function correctDis(distance=1) {
     difY
   };
 }
-var curStep = {
-  count: 0,
-  status: false
-};
-var nowline = null;
-var orline = [];
-var linshi;
-var curWayStart;
-var mnAngle=null;
+
 function handleMotion(event) {
   //$("title").text(event.accelerationIncludingGravity.x + "," + event.accelerationIncludingGravity.y + "," + event.accelerationIncludingGravity.z);
   /**进行判断 */
@@ -1169,49 +961,46 @@ function handleMotion(event) {
   sqr = Math.sqrt(event.accelerationIncludingGravity.x * event.accelerationIncludingGravity.x +
     event.accelerationIncludingGravity.y * event.accelerationIncludingGravity.y +
     event.accelerationIncludingGravity.z * event.accelerationIncludingGravity.z);
-  if (nowline) { // 当存在初始值时才进行趋势判断
-    if (sqr >= nowline) { // 如果获取到的计算后的加速度值 大于 上一个值
-      orline.push(1); // 表明趋势增加，记录趋势值为1
-      nowline = sqr; // 更新比较值
-    } else if (sqr < nowline) { // 如果小于的话
-      orline.push(-1); // 表明趋势减少，记录趋势值为-1
-      nowline = sqr; // 更新比较值
+  if (PLocationStatus.nowLine) { // 当存在初始值时才进行趋势判断
+    if (sqr >= PLocationStatus.nowLine) { // 如果获取到的计算后的加速度值 大于 上一个值
+      PLocationStatus.orLine.push(1); // 表明趋势增加，记录趋势值为1
+      PLocationStatus.nowLine = sqr; // 更新比较值
+    } else if (sqr < PLocationStatus.nowLine) { // 如果小于的话
+      PLocationStatus.orLine.push(-1); // 表明趋势减少，记录趋势值为-1
+      PLocationStatus.nowLine = sqr; // 更新比较值
     }
   } else { // 初始值不存在时，记录当前的数据，并将当前的趋势值记录为0
-    nowline = sqr;
-    orline.push(0);
+    PLocationStatus.nowLine = sqr;
+    PLocationStatus.orLine.push(0);
   }
 
   watchPause();
 }
-var step = 1;
 
 /**计步器实际调用情况 */
 function watchPause() {
-  if (orline.length > 75) {//60次约1秒调用一次
+  if (PLocationStatus.orLine.length > 75) {//60次约1秒调用一次
     console.log("***计步器调用***");
     var x = 0, y = 0;
-    for (var i = 0; i < orline.length; i++) {
-      if (orline[i] == 1) {
+    for (var i = 0; i < PLocationStatus.orLine.length; i++) {
+      if (PLocationStatus.orLine[i] == 1) {
         x++;
         y = 0;
-        x >= 5 ? (step++, curStep.status = true) : (step = step);
-      } else if (orline[i] == -1) {
+        x >= 5 ? (PLocationStatus.step++, PLocationStatus.curStep.status = true) : (PLocationStatus.step = PLocationStatus.step);
+      } else if (PLocationStatus.orLine[i] == -1) {
         x = 0;
         y++;
       }
     }
-    if (1
-      //parseInt(step / 2) > curStep.count
-    ) {
-        curStep.count = Math.floor(step / 2);
-      console.log("计步+1",step,curStep.count);
-      if (StepMock)
-        StepMock();
+    if (1) {
+        PLocationStatus.curStep.count = Math.floor(PLocationStatus.step / 2);
+      console.log("计步+1",PLocationStatus.step,PLocationStatus.curStep.count);
+      if (PLocationStatus.StepMock)
+        PLocationStatus.StepMock();
     } else {
-      curStep.status = false;
+      PLocationStatus.curStep.status = false;
     }
-    orline = [];
+    PLocationStatus.orLine = [];
   }
 }
 
@@ -1220,17 +1009,17 @@ function PosToRoad(x, y) {
   let poi = new Vector3(x, 0.0, y);
   /**先获取最近的两个位置点 */
   let PosArry = [];
-  if (NearistArr.length > 1) {
-    if (Vector3.Distance(poi, NearistArr[0].p) > NearistArr[0].d) {
-      NearistArr[0].d = Vector3.Distance(poi, NearistArr[0].p);
-      NearistArr.reverse();
+  if (PLocationStatus.nearistArr.length > 1) {
+    if (Vector3.Distance(poi, PLocationStatus.nearistArr[0].p) > PLocationStatus.nearistArr[0].d) {
+      PLocationStatus.nearistArr[0].d = Vector3.Distance(poi, PLocationStatus.nearistArr[0].p);
+      PLocationStatus.nearistArr.reverse();
     } else {
-      NearistArr[0].d = Vector3.Distance(poi, NearistArr[0].p);
+      PLocationStatus.nearistArr[0].d = Vector3.Distance(poi, PLocationStatus.nearistArr[0].p);
     }
-    if (x <= NearistArr[0].p.x || y <= NearistArr[0].p.z) {
-      PosArry = [NearistArr[0].p, NearistArr[1].p];
+    if (x <= PLocationStatus.nearistArr[0].p.x || y <= PLocationStatus.nearistArr[0].p.z) {
+      PosArry = [PLocationStatus.nearistArr[0].p, PLocationStatus.nearistArr[1].p];
     } else {
-      NearistArr.pop();
+      PLocationStatus.nearistArr.pop();
       return poi;
     }
   } else {
@@ -1248,35 +1037,34 @@ function PosToRoad(x, y) {
   return new Vector3(Rx, 0.0, Ry);
 }
 
-var NearistArr = [];
 /**找到最近距离的两个点 */
 function FindNearistPoint2L(position) {
-  console.log("findNearistPoi", NearistArr);
+  console.log("findNearistPoi", PLocationStatus.nearistArr);
   let first = false;
   for (let pLandmark of NavChartDC.DC.m_pLayerMgr.m_pActiveLayer.m_mLandmarkList) {
-    if (NearistArr.length < 1) {
-      NearistArr.push({
+    if (PLocationStatus.nearistArr.length < 1) {
+      PLocationStatus.nearistArr.push({
         p: pLandmark.m_mPoint.Object.m_mPosition,
         d: Vector3.Distance(pLandmark.m_mPoint.Object.m_mPosition, position)
       });
-    } else if (NearistArr.length < 2) {
+    } else if (PLocationStatus.nearistArr.length < 2) {
       let dt = Vector3.Distance(pLandmark.m_mPoint.Object.m_mPosition, position);
-      if (dt >= NearistArr[0].d && pLandmark.m_mPoint.Object.m_mPosition != NearistArr[0].p) {
-        NearistArr.push({
+      if (dt >= PLocationStatus.nearistArr[0].d && pLandmark.m_mPoint.Object.m_mPosition != PLocationStatus.nearistArr[0].p) {
+        PLocationStatus.nearistArr.push({
           p: pLandmark.m_mPoint.Object.m_mPosition,
           d: dt
         });
-      } else if (pLandmark.m_mPoint.Object.m_mPosition != NearistArr[0].p) {
-        NearistArr.unshift({
+      } else if (pLandmark.m_mPoint.Object.m_mPosition != PLocationStatus.nearistArr[0].p) {
+        PLocationStatus.nearistArr.unshift({
           p: pLandmark.m_mPoint.Object.m_mPosition,
           d: dt
         });
       }
     } else {
-      if (Vector3.Distance(pLandmark.m_mPoint.Object.m_mPosition, position) < NearistArr[0].d) {
+      if (Vector3.Distance(pLandmark.m_mPoint.Object.m_mPosition, position) < PLocationStatus.nearistArr[0].d) {
         first = true;
-        NearistArr.pop();
-        NearistArr.unshift({
+        PLocationStatus.nearistArr.pop();
+        PLocationStatus.nearistArr.unshift({
           p: pLandmark.m_mPoint.Object.m_mPosition,
           d: Vector3.Distance(pLandmark.m_mPoint.Object.m_mPosition, position)
         });
@@ -1285,9 +1073,9 @@ function FindNearistPoint2L(position) {
   }
   if (!first) {
     for (let pLandmark of NavChartDC.DC.m_pLayerMgr.m_pActiveLayer.m_mLandmarkList) {
-      if (Vector3.Distance(pLandmark.m_mPoint.Object.m_mPosition, position) < NearistArr[1].d && pLandmark.m_mPoint.Object.m_mPosition != NearistArr[0].p) {
-        NearistArr.pop();
-        NearistArr.push({
+      if (Vector3.Distance(pLandmark.m_mPoint.Object.m_mPosition, position) < PLocationStatus.nearistArr[1].d && pLandmark.m_mPoint.Object.m_mPosition != PLocationStatus.nearistArr[0].p) {
+        PLocationStatus.nearistArr.pop();
+        PLocationStatus.nearistArr.push({
           p: pLandmark.m_mPoint.Object.m_mPosition,
           d: Vector3.Distance(pLandmark.m_mPoint.Object.m_mPosition, position)
         });
@@ -1302,76 +1090,76 @@ function LimitGPS() {
 }
 
 /**过滤精度大的值 */
-function FilterGPSPoi (gpsPosition) {
+function FilterGPSPoi (positionParam) {
   /**几个点，拿到的第一个精度<=30的为基准数据，之后每个30一下的数据先做相交测试，成功做为基准数据
    * 大于30的做相交计算，拿到相交点，半径为精度值，然后更新基准数据
    * 先这么做
    */
   let mGPSpiont;
-  if (!PLocation){
-    if (gpsPosition.accuracy<=30){
-      PLocation = {
+  if (!PLocationStatus.PLocation){
+    if (positionParam.accuracy<=30){
+      PLocationStatus.PLocation = {
         Work:0,
         Layer:0,
-        Position:new Vector3(gpsPosition.longitude,0.0,gpsPosition.latitude)
+        Position:new Vector3(positionParam.longitude,0.0,positionParam.latitude)
       }
-      GLOBAL.PLocation = PLocation;
-      NNavigation.UpdateLocation(0,0,PLocation.Position);
+      GLOBAL.PLocation = PLocationStatus.PLocation;
+      NNavigation.UpdateLocation(0,0,PLocationStatus.PLocation.Position);
     }
     /**如果有一直没得30的情况 遇到了再说吧 */
   }else {
-    mGPSpiont = new Vector3(gpsPosition.longitude,0.0,gpsPosition.latitude);
+    mGPSpiont = new Vector3(positionParam.longitude,0.0,positionParam.latitude);
     /**小于30时情况 */
-    if (gpsPosition.accuracy<=15){
-      let mPointDis = Vector3.Distance(PLocation.Position,mGPSpiont);
+    if (positionParam.accuracy<=15){
+      let mPointDis = Vector3.Distance(PLocationStatus.PLocation.Position,mGPSpiont);
       if (mPointDis<=10){
         console.log("distance小于15");
-        PLocation = {
+        PLocationStatus.PLocation = {
           Work:0,
           Layer:0,
-          Position:new Vector3(gpsPosition.longitude,0.0,gpsPosition.latitude)
+          Position:new Vector3(positionParam.longitude,0.0,positionParam.latitude)
         }
-        GLOBAL.PLocation = PLocation;
-        NNavigation.UpdateLocation(0,0,PLocation.Position);
+        GLOBAL.PLocation = PLocationStatus.PLocation;
+        NNavigation.UpdateLocation(0,0,PLocationStatus.PLocation.Position);
       } else {
         console.log("distance 大于15小于30");
         /**相交后的交点 */
         let cPoint;
-        cPoint=CrossPoint(mGPSpiont,gpsPosition.accuracy);
+        cPoint=CrossPoint(mGPSpiont,positionParam.accuracy);
         if (cPoint) {
-          PLocation = {
+          PLocationStatus.PLocation = {
             Work:0,
             Layer:0,
             Position:new Vector3(cPoint.x,0.0,cPoint.z)
           }
-          GLOBAL.PLocation = PLocation;
-          NNavigation.UpdateLocation(0,0,PLocation.Position);
+          GLOBAL.PLocation = PLocationStatus.PLocation;
+          NNavigation.UpdateLocation(0,0,PLocationStatus.PLocation.Position);
         } else {
           let mockPos;
-          mockPos=StepMock();
-          PLocation = {
+          mockPos=PLocationStatus.StepMock();
+          PLocationStatus.PLocation = {
             Work:0,
             Layer:0,
             Position:mockPos
           }
-          GLOBAL.PLocation = PLocation;
+          GLOBAL.PLocation = PLocationStatus.PLocation;
         }
       }
     }
     /**大于30的情况 */
     else {
       let cPoint;
-        cPoint=CrossPoint(mGPSpiont,gpsPosition.accuracy/2);
+        cPoint=CrossPoint(mGPSpiont,positionParam.accuracy/2);
         if (cPoint) {
-          PLocation = {
+          PLocationStatus.PLocation = {
             Work:0,
             Layer:0,
             Position:new Vector3(cPoint.x,0.0,cPoint.z)
           }
-          GLOBAL.PLocation = PLocation;
-          NNavigation.UpdateLocation(0,0,PLocation.Position);
+          GLOBAL.PLocation = PLocationStatus.PLocation;
+          NNavigation.UpdateLocation(0,0,PLocationStatus.PLocation.Position);
         } else {
-          StepMock();
+          PLocationStatus.StepMock();
         }
     }
   }
@@ -1379,16 +1167,16 @@ function FilterGPSPoi (gpsPosition) {
 
 /**两点做相交，PLocation一直为基准点 */
 function CrossPoint (Point,acc) {
-  let mPointDis = Vector3.Distance(Point,PLocation.Position);
+  let mPointDis = Vector3.Distance(Point,PLocationStatus.PLocation.Position);
   /**先算有没有相交点，没有就count */
-  if (mPointDis>acc+15+disablecount*10){
-    if (disablecount>=5){
+  if (mPointDis>acc+15+PLocationStatus.disableCount*10){
+    if (PLocationStatus.disableCount>=5){
       let MockPoint;
-      MockPoint = StepMock();
+      MockPoint = PLocationStatus.StepMock();
       return MockPoint;
     }
-    disablecount++;
-    StepMock();
+    PLocationStatus.disableCount++;
+    PLocationStatus.StepMock();
     return null;
   }
   /**先得到两个点，然后拿靠近两圆心的中点的那个点 */
@@ -1401,9 +1189,9 @@ function CrossPoint (Point,acc) {
     h = Math.sqrt(225-a*a);
     if (isNaN(h))
     h=0;
-    x1 = PLocation.Position.x;
+    x1 = PLocationStatus.PLocation.Position.x;
     x2 = Point.x;
-    y1 = PLocation.Position.z;
+    y1 = PLocationStatus.PLocation.Position.z;
     y2 = Point.z;
     x0 = x1+(a/mPointDis)*(x2-x1);
     y0 = y1+(a/mPointDis)*(y2-y1);
@@ -1426,54 +1214,18 @@ function CrossPoint (Point,acc) {
 
 /**检测是否还有蓝牙 */
 function checkBLE () {
-  if (IndoorStatus){
-    if (new Date().getTime() - resfloor.time>2000){
+  if (PLocationStatus.IndoorStatus){
+    if (new Date().getTime() - PLocationStatus.resfloor.time>2000){
       if (NNavigation.g_pActiveList.length>0){
-        if(NNavigation.g_pActiveList[0].m_aPath[NNavigation.g_pActiveList[0].m_aPath.length-1].m_pLayerName=="5F"&&new Date().getTime() - resfloor.time>8000){
-          IndoorStatus = false;
-          D("请重新规划室外导航路线",1000);
+        if(NNavigation.g_pActiveList[0].m_aPath[NNavigation.g_pActiveList[0].m_aPath.length-1].m_pLayerName=="5F"&&new Date().getTime() - PLocationStatus.resfloor.time>8000){
+          PLocationStatus.IndoorStatus = false;
+          CenterToastShow("请重新规划室外导航路线",1000);
         }
       }else {
-        IndoorStatus = false;
+        PLocationStatus.IndoorStatus = false;
       }
     }
     checkBLE();
   }
 }
 
-/**GPS导航采用完全模拟导航
- * 如何知晓转弯
- * 
- */
-function GPSNavigation () {
-  // if (GPSTimer) {
-  //   console.log("切换模拟导航");
-  //   navigator.geolocation.clearWatch(GPSTimer);
-  //   GPSTimer = "GPS";
-  //   addDeviceMotion();
-  //   StepMock();
-  // }
-}
-
-function GPSNavigationEnd () {
-  // if (GPSTimer == "GPS"){
-  //   console.log("恢复定位");
-  //   removeDeviceMotion();
-  //   GPSTimer = setInterval(getGpsLocationGD, 1000);
-  // }
-}
-/**GPS参数申明 */
-var last_lat, lat;
-var last_lng, lng;
-var last_alt, alt;
-var last_gpsTime, gpsTime;
-lat = last_lat = 0;
-lng = last_lng = 0;
-alt = last_alt = 0;
-//gpsTime = last_gpsTime = new Date().getTime();
-var dataLngLatAccuracy = 0;
-var dataAltAccuracy = 0
-var angle = 0;
-var speed = 0;
-
-var tempCount = 0;
