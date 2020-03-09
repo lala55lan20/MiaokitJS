@@ -4,19 +4,81 @@
 //TODO 170行 let toggle: any = $(this).find('h3').toggle;
 //TODO 512行 $(".lockScene").toggle(UnlockScene, LockScene);
 
-var lockFlag = 0;
-var ppSearch = decodeURIComponent(window.location.search);
-var LockIcon = false; /// TODO 命名统一
-var mockFlag = false;
-var chooseStartFlag = false;
+/**
+ * 导航状态参数
+ */
+var NavigationStatus = {
+    mockFlag : false,   ///使用模拟导航形式进行导航
+    chooseStartFlag : false,    ///是否可以点选地图进行选择起点
+    toRoomid : "",
+    buildName : "",
+    floorName : "",
+    foundEvent : null,
+};
+var SceneStatus = {
+    current_floor : null,
+    currentScene : "室外",
+    lockFlag:!1,
+};
+var UIStatus = {
+    initStatus : !1,
+    cacheStartPoint : "cache-start-point",
+    cacheEndPoint : "cache-end-point",
+    cacheType : this.cacheStartPoint,
+    isStartInput : !0,
+    isNavSuccess : !0,
+    isNowNavigating : !1,
+    defaultStart : "default-start-point",
+    compass : $(".compass").get(0),
+    oBeancons : null,
+    animates : {type0: "0",type1: "1",type2: "2",type3: "3",type4: "4",type5: "5",type6: "6",type7: "7"},
+    ppSearch : decodeURIComponent(window.location.search),
+    lockIcon : false,
+    step: 0,
+    floorBoxLiHeight: 0,
+    indexStatus : !1,
+    audio : document.getElementById("voice"),
+    pageSymble : location.href.indexOf("#") > -1 ? location.href.split("#")[1] : "index",
+    DocumentEvent: function(){},
+    voiceEle: undefined,
+    pageStatus : false,
+    popped : "state" in window.history,
+    floorBoxHeight :0,
+    floorBoxInitHeight:0
+};
+
+const SystemStatus = {
+    app_version : "3.1.0",
+    HttpCacheTime : 864e5,
+    InitialURL : location.href,
+    dpr : window.devicePixelRatio || 1,
+    Scale : {x: 1,y: 1},
+    UpLoadPath : "../",
+    WinWid : $(window).width(),
+    WinHigh : $(window).height(),
+    hostParams : location.href.split("#")[0]
+}
+
+var _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ?
+    function (e) {
+        return typeof e;
+    } :
+    function (e) {
+        return e &&
+            "function" == typeof Symbol &&
+            e.constructor === Symbol &&
+            e !== Symbol.prototype ?
+            "symbol" :
+            typeof e;
+    };
 
 /// TODO 注释，规范
-function mSetItem(e, t) {
+function SetLocationItem(e, t) {
     window.localStorage.setItem(e, t);
 }
 
 /// TODO 注释，规范
-function mGetItem(e) {
+function GetLocationItem(e) {
     return window.localStorage.getItem(e);
 }
 
@@ -26,8 +88,8 @@ function GetQueryString(pName) {
     let regRewrite = new RegExp("(^|/)" + pName + "/([^/]*)(/|$)", "i");
 
     let r = null;
-    if (ppSearch) {
-        let r = ppSearch.substr(1).match(reg);
+    if (UIStatus.ppSearch) {
+        let r = UIStatus.ppSearch.substr(1).match(reg);
     }
 
     let q = window.location.pathname.substr(1).match(regRewrite);
@@ -53,12 +115,9 @@ function ToastShow(text) {
             if (text[i].indexOf("米") != -1) {
                 let distance = text[i].replace("米", "");
                 distance = parseInt(distance);
-                // if ($(".InfoToast span").text().indexOf(text[text.length - 1]) == -1) {
-                //   LockIcon = false;
-                // }
-                if (!LockIcon) {
+                if (!UIStatus.lockIcon) {
                     $("#Info-Img").attr("src", "images/ts.png");
-                    LockIcon = true;
+                    UIStatus.lockIcon = true;
                 }
             }
         }
@@ -96,8 +155,8 @@ function ToastHide() {
 
 /// 镜头固定，不能切换楼层与楼宇
 function LockScene() {
-    lockFlag = 1;
-    if (Posfault && !mockFlag) {
+    SceneStatus.lockFlag = !0;
+    if (PLocationStatus.posFault && !NavigationStatus.mockFlag) {
         NNavigation.EnableLocate(true);
     }
     LockCameraToPath(1);
@@ -146,22 +205,25 @@ function LockScene() {
 }
 
 /// TODO 注释
-function hideRollback() {
-    audio.volume = 0,
+/**
+ * 路线回放栏隐藏
+ */
+function HideRollback() {
+    UIStatus.audio[0].volume = 0,
         $("#select-add").unbind("click").click(function () {
             MiaokitDC.DC.m_nCurWork != 0 ? SwitchScene(null) : SwitchScene("体育场");
         }),
         // icondown(),
         ToastHide(),
         $(".history-rollback-wrapper").css("display", "none");
-    if (!Posfault) {
+    if (!PLocationStatus.posFault) {
         $(".lockScene").hide()
     }
     $(".floor-box-div").hide();
 }
 
 /// 显示再次导航
-function showNavAgain() {
+function ShowNavAgain() {
     $("#nav-again").css("display", "flex");
     $("#nav-again").animate({
         opacity: 0.9
@@ -170,7 +232,7 @@ function showNavAgain() {
 }
 
 /// 隐藏再次导航
-function hideNavAgain() {
+function HideNavAgain() {
     icondown();
     $("#nav-again").animate({
         opacity: 0
@@ -181,8 +243,8 @@ function hideNavAgain() {
 
 /// 镜头自由，判断是否是导航楼层
 function UnlockScene() {
-    lockFlag = 0;
-    if (Posfault && NNavigation.g_pActiveList.length == 0) {
+    SceneStatus.lockFlag = !1;
+    if (PLocationStatus.posFault && NNavigation.g_pActiveList.length == 0) {
         NNavigation.EnableLocate(false);
     }
     LockCameraToPath(0);
@@ -206,7 +268,7 @@ function UnlockScene() {
 }
 
 /// 导航开始后自由镜头，隐藏光点
-function navigatehiden(startid, endid, nType, event = null) {
+function Navigatehiden(startid, endid, nType, event = null) {
     UnlockScene();
     // NNavigation.ClearAllPath();
     Navigate(startid, endid, nType);
@@ -214,14 +276,13 @@ function navigatehiden(startid, endid, nType, event = null) {
         // let cachePOS = new Vector3(NNavigation.g_pActiveList[0].m_aPath[0].m_aPath[0].x, 0, -NNavigation.g_pActiveList[0].m_aPath[0].m_aPath[0].z);
         Engine.g_pInstance.m_pCameraCtrl.setCpoint = NNavigation.g_pActiveList[0].m_aPath[0].m_aPath[0];
     }
-    GPSNavigation();
     /**暂时未找到切换导航路径的方法，先用模拟点击作为方案 */
     if (!event) {
         $(".history-rollback-wrapper ul li").eq(0).trigger("click");
         if (NNavigation.g_pActiveList.length != 0) {
-            if (GPSTimer) {
+            if (PLocationStatus.GPSTimer) {
                 setTimeout(function () {
-                    SetCamera(PLocation.Position, undefined, undefined, undefined);
+                    SetCamera(PLocationStatus.PLocation.Position, undefined, undefined, undefined);
                 }, 200);
             }
             else {
@@ -236,16 +297,16 @@ function navigatehiden(startid, endid, nType, event = null) {
 }
 
 /// 原有导航方案，模拟导航
-function navigation(startid, endid, nType, event = null) {
+function Navigation(startid, endid, nType, event = null) {
     // NNavigation.ClearAllPath();
-    if (Posfault && $(".start_input input").val() != "我的位置") {
+    if (PLocationStatus.posFault && $(".start_input input").val() != "我的位置") {
         NNavigation.EnableLocate(false);
         NNavigation.g_pCurLocation = null;
-        mockFlag = true;
-        PLocation = null;
+        NavigationStatus.mockFlag = true;
+        PLocationStatus.PLocation = null;
         event = "autostep";
     }
-    LockIcon = false;
+    UIStatus.lockIcon = false;
     Navigate(startid, endid, nType);
     $(".history-rollback-wrapper ul li").eq(0).trigger("click");
     LockScene();
@@ -263,39 +324,38 @@ function navigation(startid, endid, nType, event = null) {
     $("#Info-Img").attr("src", "images/ts.png");
     Engine.g_pInstance.m_pSetNavPoint = null;
     iconup($(".search_direction_box").height());
-    GPSNavigation();
 }
 
 /// 检查起终点的方法
-function checkset(event) {
-    audio.volume = 1;
+function CheckSet(event) {
+    UIStatus.audio[0].volume = 1;
     var e = $(".start_input input").attr("roomid"), //获取startid
         t = $(".end_input input").attr("roomid"); //获取endid
     $(".end_input input").val();
     if ($(".start_input input").val() == "我的位置") {
-        e = PLocation;
+        e = PLocationStatus.PLocation;
     }
     else if ($(".start_input input").val() != "我的位置") {
         NNavigation.EnableLocate(false);
         NNavigation.g_pCurLocation = null;
-        mockFlag = true;
-        PLocation = null;
+        NavigationStatus.mockFlag = true;
+        PLocationStatus.PLocation = null;
         event = "autostep";
     }
     if (e && t && e != t) {
         $(".search-path-floor").css("display", "flex");
-        if (Posfault && $(".lockScene").is(":visible")) {
+        if (PLocationStatus.posFault && $(".lockScene").is(":visible")) {
             $(".lockScene").hide();
         }
 
-        navigatehiden(e, t, 0, event);
+        Navigatehiden(e, t, 0, event);
         $(".navigation_btn .search-nav-text").text("开始导航");
         $(".search-path").show();
     }
     else {
         if (!e) {
-            D("点击地图选择起点", 3000);
-            chooseStartFlag = true;
+            CenterToastShow("点击地图选择起点", 3000);
+            NavigationStatus.chooseStartFlag = true;
         }
         $(".history-rollback-wrapper").css("display", "none");
         $(".search-path").hide();
@@ -312,18 +372,12 @@ function checkset(event) {
 }
 
 /// 设置起点的方法
-function setStartPoint(id, name, event = undefined) {
-    /**设置需要做的几点，
-     * 1、填入start_input
-     * 2、build和floor填入后方标签
-     * 3、检验是否起终点合格checkset
-     * 以上
-     */
-    if (chooseStartFlag) {
-        D("已选择起点", 1000);
+function SetStartPoint(id, name, event = undefined) {
+    if (NavigationStatus.chooseStartFlag) {
+        CenterToastShow("已选择起点", 1000);
     }
-    chooseStartFlag = false;
-    $("#start_position").val(name.replace("/ \s * / g", ""));
+    NavigationStatus.chooseStartFlag = false;
+    $("#start_position").val(name.replace(/\s*/g, ""));
     startName = name;
     $("#start_position").attr("roomid", id);
     let build, floor;
@@ -354,7 +408,7 @@ function setStartPoint(id, name, event = undefined) {
         });
     }
     else {
-        build = currentScene;
+        build = SceneStatus.currentScene;
         floor = $(".floor_box .current-active-floor").text();
         if (!floor) {
             floor = "1F";
@@ -365,20 +419,20 @@ function setStartPoint(id, name, event = undefined) {
     if (event == "defaultStart") { }
     else {
         let event = null;
-        if (Posfault) {
+        if (PLocationStatus.posFault) {
             NNavigation.EnableLocate(false);
             NNavigation.g_pCurLocation = null;
-            mockFlag = true;
-            PLocation = null;
+            NavigationStatus.mockFlag = true;
+            PLocationStatus.PLocation = null;
             event = "autostep";
         }
-        checkset(event);
+        CheckSet(event);
     }
 }
 
 /// 设置终点的方法
-function setEndPoint(id, name, build = undefined, floor = undefined) {
-    $("#end_position").val(name.replace("/ \s * / g", ""));
+function SetEndPoint(id, name, build = undefined, floor = undefined) {
+    $("#end_position").val(name.replace(/\s*/g, ""));
     endName = name;
     $("#end_position").attr("roomid", id);
     let ebuild, efloor;
@@ -417,7 +471,7 @@ function setEndPoint(id, name, build = undefined, floor = undefined) {
     $("#end-build").text(ebuild);
     if (!efloor)
         $("#end-floor").text(efloor);
-    if (Posfault) {
+    if (PLocationStatus.posFault) {
         $(".start_input input").val("我的位置");
     }
     Engine.g_pInstance.m_pTackEnd = true;
@@ -425,27 +479,27 @@ function setEndPoint(id, name, build = undefined, floor = undefined) {
     if (NNavigation.g_pActiveList.length > 0) {
         event = "chongzhi"
     }
-    checkset(event);
+    CheckSet(event);
 }
 
 /// 显示吐司
-function showMsg(text, status) {
+function ShowMsg(text, status) {
     if (text) {
         $("#msgBox .msgtxt").text(text);
     }
     $("#msgBox").show();
     if (status) {
-        setTimeout(hideMsg, status);
+        setTimeout(HideMsg, status);
     }
 }
 
 /// 隐藏信息
-function hideMsg() {
+function HideMsg() {
     $("#msgBox").hide("fast");
 }
 
 /// 显示模拟导航按钮
-function showMockBtn() {
+function ShowMockBtn() {
     console.log("showmockbtn");
     let btn = $("#autostep");
     btn.show();
@@ -457,7 +511,7 @@ function showMockBtn() {
 }
 
 /// 隐藏模拟导航按钮
-function hideMockBtn() {
+function HideMockBtn() {
     console.log("hidemockbtn");
     let btn = $("#autostep");
     btn.hide();
@@ -471,43 +525,34 @@ function hideMockBtn() {
 /// 路径更新
 NNavigation.m_goNext = function () {
     setTimeout(function () {
-        LockIcon = false;
+        UIStatus.lockIcon = false;
     }, 500);
 }
 
 /// 初始化
 $(function () {
-    if (Posfault) {
+    if (PLocationStatus.posFault) {
         $(".lockScene").show();
     }
 
     $(".lockScene").click(function () {
-        if (lockFlag) {
+        if (SceneStatus.lockFlag) {
             UnlockScene()
         } else {
             LockScene()
         }
     });
 
-    // $(".lockScene").click(function(){
-    //     if ($(".lockScene").text()=="自由镜头") {
-    //         LockScene();
-    //     } else {
-    //         UnlockScene();
-    //     }
-    // });
-
     $("#again-canel").click(function () {
-        hideNavAgain();
+        HideNavAgain();
     });
     $("#again-btn").click(function () {
-        hideNavAgain();
+        HideNavAgain();
         $(".search_direction_box").show();
         $(".navigation_btn").show();
         iconup($(".search_direction_box").height());
     });
-    /** */
-    $(".btn-exit-rollback")["live"]("click", function (e) {
+    $(".btn-exit-rollback")["on"]("click", function (e) {
         e.preventDefault();
         $(".search_direction_box").hide();
         $(".pre-navigate").show();
@@ -515,7 +560,7 @@ $(function () {
         $(".search-box").show();
         UnlockScene();
         icondown();
-        Posfault = false;
+        PLocationStatus.posFault = false;
     });
     $("#replanning").click(() => {
         $(".navigation_btn .search-nav-text").text("再次导航");
@@ -538,9 +583,9 @@ $(function () {
                     startid = $(".start_input input").attr("roomid"), //获取startid
                     endid = $(".end_input input").attr("roomid"); //获取endid
                 if ($(".start_input input").val() == "我的位置") {
-                    startid = PLocation;
+                    startid = PLocationStatus.PLocation;
                 }
-                navigatehiden(startid, endid, type);
+                Navigatehiden(startid, endid, type);
                 /**有没有只改变一个参数的办法 */
             }
         });
@@ -562,8 +607,8 @@ $(function () {
             console.error("关闭蓝牙");
             PLocation = null;
         }
-        mockFlag = true;
-        navigation(startid, endid, type, event);
+        NavigationStatus.mockFlag = true;
+        Navigation(startid, endid, type, event);
     });
 
     $("#search-navigate-btn").click(function () {
@@ -585,30 +630,19 @@ $(function () {
         }
         $(".search_direction_box").show();
         $("#search-go").show();
-        setEndPoint("001", "疏散点", 0, 0);
+        SetEndPoint("001", "疏散点", 0, 0);
         $(".search-path-floor li:first").trigger("click");
     }
 
-    /** */
+    /** 疏散按钮绑定方法*/
     $("#shusan").bind("click", shusan);
 });
 
 //TODO:旧代码=========================----------------------------------------------
 
-var _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ?
-    function (e) {
-        return typeof e;
-    } :
-    function (e) {
-        return e &&
-            "function" == typeof Symbol &&
-            e.constructor === Symbol &&
-            e !== Symbol.prototype ?
-            "symbol" :
-            typeof e;
-    };
 
-function canRunES6(e) {
+
+function CanRunES6(e) {
     try {
         return new Function(e)(), !0;
     } catch (e) {
@@ -616,7 +650,12 @@ function canRunES6(e) {
     }
 }
 
-function D(e, t=0) {
+/**
+ * 
+ * @param e txt 显示信息
+ * @param t time 显示时长
+ */
+function CenterToastShow(e, t=0) {
     t = isNaN(t) ? 3e3 : t;
     var a = document.createElement("div");
     (a.innerHTML = e),
@@ -633,29 +672,8 @@ function D(e, t=0) {
         }, t);
 }
 
-var app_version = "3.1.0";
-var index_status = !1;
-var audio: any = document.getElementById("voice");
 
-var Froomloc = "";
-var buildName = "";
-var floorName = "";
-var Fevent = null;
-var currentScene = "室外";
-var pageStatus = false;
-var http_cache_time = 864e5;
-var dpr = window.devicePixelRatio || 1;
-var scale = {
-    x: 1,
-    y: 1
-};
-var upLoadPath = "../";
-
-var pageSymble = location.href.indexOf("#") > -1 ? location.href.split("#")[1] : "index";
-var popped = "state" in window.history;
-var initialURL = location.href;
-
-function reSetNavIcon(e) {
+function ResetNavIcon(e) {
     $(".bottom_menu ul li a").each(function () {
         if (e.indexOf($(this).attr("pageid")) > -1) {
             $(".bottom_menu ul li").find("span").removeClass("current"),
@@ -674,14 +692,14 @@ function reSetNavIcon(e) {
     });
 }
 
-function closeLeftSide() {
+function CloseLeftSide() {
     $("#left-slide").animate({
         right: "-60%"
     }, 100);
     $(".mash").hide();
 }
 
-function closePartSide() {
+function ClosePartSide() {
     $("#self-part-slide").animate({
         left: "-50%"
     },
@@ -690,7 +708,7 @@ function closePartSide() {
         $(".mash").hide();
 }
 
-function closeModelSide() {
+function CloseModelSide() {
     $("#self-model-slide").animate({
         left: "-50%"
     },
@@ -699,7 +717,7 @@ function closeModelSide() {
         $(".mash").hide();
 }
 
-function renderHospital(e) {
+function RenderHospital(e) {
     var t = JSON.parse(e).response.list[0],
         a = t.titleA,
         i = t.ContentA,
@@ -715,49 +733,35 @@ function renderHospital(e) {
         $("#page-hospital .kssz-content").html(l);
 }
 
-function renderDepartments(e) {
-    var t = JSON.parse(e),
-        a = "",
-        i = "",
-        s = "",
-        o = null;
+function RenderDepartments(e) {
+    var t = JSON.parse(e),a = "",i = "",s = "",o = null;
     for (var n in t.response) {
         (a = (o = t.response[n]).ID), o.roomID, (i = o.iconUrl), (s = o.roomName);
         var l = "";
         (l += "<li><a href='#page-dep-detail' data-id='"),
             (l += a + "' data-transition='slide'><center>"),
             (l +=
-                '<img src="images/default.png" data-src="' +
-                upLoadPath +
-                i +
-                '"/></center><p>'),
+                '<img src="images/default.png" data-src="' +SystemStatus.UpLoadPath +i +'"/></center><p>'),
             (l += s + "</p></a></li>"),
             $("#page-departments .departments_list ul").append(l);
     }
 }
 
-function renderExpert(e) {
-    var t = JSON.parse(e),
-        a = "",
-        i = "",
-        s = "",
-        o = null;
+function RenderExpert(e) {
+    var t = JSON.parse(e),a = "",i = "",s = "",o = null;
     for (var n in t.response) {
         (a = (o = t.response[n]).ID), o.roomID, (i = o.iconUrl), (s = o.roomName);
         var l = "";
         (l += "<li><a href='#page-expert-list' data-id='"),
             (l += a + "' data-transition='slide'><center>"),
             (l +=
-                "<img src='images/default.png' data-src='" +
-                upLoadPath +
-                i +
-                "'/></center><p>"),
+                "<img src='images/default.png' data-src='" +SystemStatus.UpLoadPath +i +"'/></center><p>"),
             (l += s + "</p></a></li>"),
             $("#page-expert .departments_list ul").append(l);
     }
 }
 
-function renderDepDetail(e) {
+function RenderDepDetail(e) {
     var t = JSON.parse(e),
         a = t.Name,
         i = t.Detail,
@@ -766,19 +770,11 @@ function renderDepDetail(e) {
         $("#page-dep-detail .dep_detail").html(i),
         "" === s || "string" != typeof s ?
             $("#page-dep-detail img").attr("src", "images/hospital_img.png") :
-            $("#page-dep-detail img").attr("src", upLoadPath + s);
+            $("#page-dep-detail img").attr("src", SystemStatus.UpLoadPath + s);
 }
 
-function renderExpertList(e) {
-    var t = JSON.parse(e).response,
-        a = null,
-        i = "",
-        s = "",
-        o = "",
-        n = "",
-        l = "",
-        r = "",
-        c = "";
+function RenderExpertList(e) {
+    var t = JSON.parse(e).response,a = null,i = "",s = "",o = "",n = "",l = "",r = "",c = "";
     for (var d in t)
         (s = (a = t[d]).Name),
             (o = a.Education),
@@ -786,15 +782,8 @@ function renderExpertList(e) {
             (l = a.Header),
             (r = a.ID),
             (c = a.Content),
-            (i +=
-                "<li><a href='#page-expert-detail' data-transition='slide' data-id='" +
-                r +
-                "'>"),
-            (i +=
-                "<img src='images/default.png' data-src='" +
-                upLoadPath +
-                l +
-                "' class='header'>"),
+            (i +="<li><a href='#page-expert-detail' data-transition='slide' data-id='" +r +"'>"),
+            (i +="<img src='images/default.png' data-src='" +SystemStatus.UpLoadPath +l +"' class='header'>"),
             (i += "<div class='info_box'>"),
             (i += "<div class='name'>" + s + "</div>"),
             (i +=
@@ -810,18 +799,11 @@ function renderExpertList(e) {
             $("#page-expert .departments_list ul").html(i);
 }
 
-function renderExpertDetail(e) {
-    var t,
-        a,
-        i,
-        s,
-        o,
-        n,
-        l,
-        r = JSON.parse(e);
+function RenderExpertDetail(e) {
+    var t,a,i,s,o,n,l,r = JSON.parse(e);
     (s = r.name),
         (t = r.content),
-        (a = upLoadPath + r.header),
+        (a = SystemStatus.UpLoadPath + r.header),
         (o = r.position),
         (n = r.education),
         (i = r.workTime),
@@ -866,7 +848,7 @@ function renderExpertDetail(e) {
     }
 }
 
-function changePicModel() {
+function ChangePicModel() {
     var e = true,
         t = "";
     $(".self-sex-tag li:first-child").hasClass("self-tag-current") ?
@@ -885,10 +867,10 @@ function changePicModel() {
                 '<div class="person-model">\n\t\t\t\t\t\t<img src="images/child_female_face.jpg" alt="" width="1080" height="1920" usemap="#Map"/>\n\t\t\t\t\t\t  <map name="Map" id="Map">\n                            <area dataid="toubu" alt="" title="" href="#头部" shape="poly" coords="615,515,547,540,492,526,461,509,445,474,421,439,414,496,420,556,380,622,378,534,381,494,367,440,372,325,388,300,410,304,439,263,485,238,541,222,578,233,623,252,654,281,668,301,688,302,706,324,711,359,704,408,702,455,704,504,707,582,707,596,707,606,712,619,661,564,666,512,677,484,664,444,638,475" />\n                            <area dataid="yanjingbu" alt="" title="" href="#咽颈部" shape="poly" coords="505,533,505,549,505,564,476,583,460,588,444,591,491,593,533,593,574,592,609,590,636,590,589,565,579,545,576,535,557,540,534,543" />\n                            <area dataid="xiongbu" alt="" title="" href="#胸部" shape="poly" coords="414,618,436,650,442,671,450,758,469,764,533,770,584,773,627,759,634,744,642,659,649,645,664,614,649,599,626,596,543,597,484,599,442,599,429,603" />\n                            <area dataid="fubu" alt="" title="" href="#腹部" shape="poly" coords="436,852,451,802,451,765,462,767,485,771,514,774,538,777,571,777,595,778,612,771,626,765,633,762,634,784,640,829,646,854,662,889,670,929,618,946,549,952,490,952,447,941,418,931,416,919" />\n                            <area dataid="shengzhibuwei" alt="" title="" href="#生殖部位" shape="poly" coords="412,933,435,941,466,951,488,955,574,959,614,953,667,937,672,936,673,997,671,1037,668,1064,668,1079,622,1087,571,1087,552,1052,542,1037,531,1048,522,1059,513,1085,502,1093,463,1087,416,1078" />\n                            <area dataid="tuibu" alt="" title="" href="#腿部" shape="poly" coords="469,1573,449,1494,438,1418,432,1334,435,1275,424,1223,416,1141,415,1084,441,1091,490,1099,512,1097,575,1095,612,1094,667,1086,666,1133,663,1221,655,1273,649,1336,648,1409,618,1564,616,1608,633,1662,613,1692,580,1691,557,1638,554,1584,562,1539,564,1472,570,1367,567,1279,569,1187,570,1097,510,1099,514,1291,521,1546,528,1599,527,1635,515,1668,508,1692,472,1695,458,1680,452,1660" />\n                            <area dataid="shoubu" alt="" title="" href="#手部" shape="poly" coords="409,622,424,642,437,671,441,709,445,748,425,790,395,835,357,908,312,987,319,995,311,1020,301,1039,269,1040,255,1048,236,1038,239,990,253,975,307,857,346,805" />\n                            <area dataid="shoubu" alt="" title="" href="#手部" shape="poly" coords="672,614,687,666,701,721,721,764,742,815,784,876,810,929,828,976,843,988,846,1018,844,1033,820,1044,810,1038,780,1035,761,993,772,987,752,949,638,747,644,675,653,648" />\n                         </map>\n\t\t\t\t\t</div>'),
                 console.info("female-child")),
         $("#page-self-service .container").html(t),
-        initPeoplePic();
+        InitPeoplePic();
 }
 
-function renderSelfPartSlide(e) {
+function RenderSelfPartSlide(e) {
     var t = JSON.parse(e).response,
         a = "";
     for (var i in t)
@@ -896,64 +878,50 @@ function renderSelfPartSlide(e) {
     $("#self-part-slide ul").html(a);
 }
 
-function renderSicknessSlide(e) {
-    var t = JSON.parse(e).response,
-        a = "",
-        i = t.SicknessList;
+function RenderSicknessSlide(e) {
+    var t = JSON.parse(e).response,a = "",i = t.SicknessList;
     for (var s in i)
-        a +=
-            '<a href="#page-self-service-rusult" data-transition="slide"><li dataid="' +
-            i[s].ID +
-            '">' +
-            i[s].Name +
-            "</li></a>";
+        a +='<a href="#page-self-service-rusult" data-transition="slide"><li dataid="' +i[s].ID +'">' +i[s].Name +"</li></a>";
     $("#self-sickness-slide ul").html(a),
-        mSetItem("sickness", JSON.stringify(t.SicknessList));
+        SetLocationItem("sickness", JSON.stringify(t.SicknessList));
 }
 
-function renderSelfIllnessSlide(e) {
+function RenderSelfIllnessSlide(e) {
     var t = JSON.parse(e).response,
         a = "";
     for (var i in t)
         if ("object" == _typeof(t[i])) {
             var s = null;
             for (var o in t[i])
-                a +=
-                    '<a href="#page-self-service-rusult" data-transition="slide"><li dataid="' +
-                    (s = t[i][o]).ID +
-                    '">' +
-                    s.Name +
-                    "</li></a>";
-            mSetItem("illness", JSON.stringify(t[i]));
+                a +='<a href="#page-self-service-rusult" data-transition="slide"><li dataid="' +(s = t[i][o]).ID +'">' +s.Name +"</li></a>";
+            SetLocationItem("illness", JSON.stringify(t[i]));
         }
     $("#self-illness-slide ul").html(a);
 }
 
-function initPeoplePic() {
+function InitPeoplePic() {
     var e = arguments.length > 0 && void 0 !== arguments[0] ? arguments[0] : 0,
         t = arguments.length > 1 && void 0 !== arguments[1] ? arguments[1] : 0;
     e <= 1 || 0 === e ?
-        ((scale.x = $(window).width() / 1080),
-            (scale.y = $(window).height() / 1920)) :
-        ((scale.x = e), (scale.y = t)),
+        ((SystemStatus.Scale.x = $(window).width() / 1080),
+            (SystemStatus.Scale.y = $(window).height() / 1920)) :
+        ((SystemStatus.Scale.x = e), (SystemStatus.Scale.y = t)),
         $(".container img,.container map").css({
-            transform: "scale(" + scale.x + "," + scale.y + ")"
+            transform: "scale(" + SystemStatus.Scale.x + "," + SystemStatus.Scale.y + ")"
         });
-    var a = $("#page-self-service img").width() * scale.x,
-        i = $("#page-self-service img").height() * scale.y;
-    $("#page-self-service .person-model")
-        .width(a)
-        .height(i);
+    var a = $("#page-self-service img").width() * SystemStatus.Scale.x,
+        i = $("#page-self-service img").height() * SystemStatus.Scale.y;
+    $("#page-self-service .person-model").width(a).height(i);
 }
 
-function renderSelfModelSlide(e) {
+function RenderSelfModelSlide(e) {
     var t = "",
         a = JSON.parse(e).response;
     for (var i in a) t += '<li dataid="' + a[i].ID + '">' + a[i].Name + "</li>";
     $("#self-model-slide ul").html(t)
 }
 
-function getByteLen(e) {
+function GetByteLen(e) {
     var t = 0;
     if (e)
         for (var a = 0; a < e.length; a++) {
@@ -962,38 +930,27 @@ function getByteLen(e) {
     return t;
 }
 
-reSetNavIcon(pageSymble);
+ResetNavIcon(UIStatus.pageSymble);
 
 
 $(window).bind("popstate", function (e) {
     var t = location.href,
-        a = !popped && t == initialURL;
+        a = !UIStatus.popped && t == SystemStatus.InitialURL;
     if (
-        ((popped = !0),
+        ((UIStatus.popped = !0),
             !a && $(".index").hasClass("ui-page-active"),
             !a && $("#page-self-service").hasClass("ui-page-active"))
     ) {
-        var i = !0,
-            s = !0;
+        var i = !0,s = !0;
         "none" != $("#self-illness-slide").css("display") &&
             ((i = !1),
-                window.history.pushState({
-                    title: "自助导诊"
-                },
-                    "自助导诊",
-                    "/h5/index.html#page-self-service"
-                ),
+                window.history.pushState({title: "自助导诊"},"自助导诊","/h5/index.html#page-self-service"),
                 $("#self-illness-slide").css("display", "none")),
             "0px" == $("#self-model-slide").css("left") &&
             "none" == $("#self-illness-slide").css("display") &&
             i &&
             ('{"title":"自助导诊"}' != JSON.stringify(window.history.state) &&
-                window.history.pushState({
-                    title: "自助导诊"
-                },
-                    "自助导诊",
-                    "/h5/index.html#page-self-service"
-                ),
+                window.history.pushState({title: "自助导诊"},"自助导诊","/h5/index.html#page-self-service"),
                 $(".mash").trigger("click")),
             "none" != $("#self-sickness-slide").css("display") &&
             ((s = !1),
@@ -1017,13 +974,13 @@ $(window).bind("popstate", function (e) {
                 ),
                 $(".mash").trigger("click"));
     }
-    reSetNavIcon(
-        (pageSymble =
+    ResetNavIcon(
+        (UIStatus.pageSymble =
             location.href.indexOf("#") > -1 ? location.href.split("#")[1] : "index")
     );
 });
 $(".bottom_menu ul li a").click(function () {
-    (audio.volume = 0),
+    (UIStatus.audio[0].volume = 0),
         Engine.g_pInstance.m_pProject.StopAutoMotion(),
         $(".bottom_menu ul li")
             .find("span")
@@ -1040,37 +997,19 @@ $(".bottom_menu ul li a").click(function () {
             var e = $(this).attr("class");
             (e = e.replace("_current", "")), $(this).attr("class", e);
         });
-    var e = $(this)
-        .find("div")
-        .attr("class");
-    $(this)
-        .find("div")
-        .removeClass(e),
-        $(this)
-            .find("div")
-            .addClass(e + "_current"),
-        "index" != $(this).attr("pageid") ?
-            window.history.replaceState({
-                title: "导航"
-            },
-                "导航",
-                "/h5/index.html"
-            ) :
-            index_status ?
-                window.history.replaceState({
-                    title: "导航"
-                },
-                    "导航",
-                    "/h5/index.html"
-                ) :
-                index_status || (index_status = !0);
+    var e = $(this).find("div").attr("class");
+    $(this).find("div").removeClass(e);
+    $(this).find("div").addClass(e + "_current");
+    "index" != $(this).attr("pageid") ?window.history.replaceState({title: "导航"},"导航","/h5/index.html") :
+            UIStatus.indexStatus ?window.history.replaceState({title: "导航"},"导航","/h5/index.html") :
+                UIStatus.indexStatus || (UIStatus.indexStatus = !0);
 });
 $(document).on("pageinit", "#page-hospital", function (e) {
-    reSetNavIcon((pageSymble = "hospital"));
+    ResetNavIcon((UIStatus.pageSymble = "hospital"));
     var t = new Date().valueOf();
-    "null" != JSON.stringify(mGetItem("page-hospital")) &&
-        parseInt(mGetItem("page-hospital-time")) > t - http_cache_time ?
-        (renderHospital(mGetItem("page-hospital")),
+    "null" != JSON.stringify(GetLocationItem("page-hospital")) &&
+        parseInt(GetLocationItem("page-hospital-time")) > t - SystemStatus.HttpCacheTime ?
+        (RenderHospital(GetLocationItem("page-hospital")),
             console.info("读取医院信息缓存")) :
         ($.ajax({
             type: "get",
@@ -1079,9 +1018,9 @@ $(document).on("pageinit", "#page-hospital", function (e) {
             success: function (e) {
                 e
                     ?
-                    (renderHospital(e),
-                        mSetItem("page-hospital", e),
-                        mSetItem("page-hospital-time", new Date().valueOf())) :
+                    (RenderHospital(e),
+                        SetLocationItem("page-hospital", e),
+                        SetLocationItem("page-hospital-time", new Date().valueOf())) :
                     console.info("请求数据出错.");
             },
             error: function (e) {
@@ -1094,11 +1033,11 @@ $(document).on("pagebeforeshow", "#page-hospital", function () {
     $("#page-hospital .hospital_img img").attr("src", "images/hospital_img.jpg")
 });
 $(document).on("pageinit", "#page-departments", function (e) {
-    reSetNavIcon((pageSymble = "departments"));
+    ResetNavIcon((UIStatus.pageSymble = "departments"));
     var t = new Date().valueOf();
-    "null" != JSON.stringify(mGetItem("page-departments")) &&
-        parseInt(mGetItem("page-departments-time")) > t - http_cache_time ?
-        (renderDepartments(mGetItem("page-departments")),
+    "null" != JSON.stringify(GetLocationItem("page-departments")) &&
+        parseInt(GetLocationItem("page-departments-time")) > t - SystemStatus.HttpCacheTime ?
+        (RenderDepartments(GetLocationItem("page-departments")),
             console.info("读取科室列表缓存")) :
         $.ajax({
             type: "get",
@@ -1107,9 +1046,9 @@ $(document).on("pageinit", "#page-departments", function (e) {
             success: function (e) {
                 e
                     ?
-                    (renderDepartments(e),
-                        mSetItem("page-departments", e),
-                        mSetItem("page-departments-time", new Date().valueOf()),
+                    (RenderDepartments(e),
+                        SetLocationItem("page-departments", e),
+                        SetLocationItem("page-departments-time", new Date().valueOf()),
                         console.info("请求科室列表数据")) :
                     console.info("请求数据出错.");
             },
@@ -1119,18 +1058,18 @@ $(document).on("pageinit", "#page-departments", function (e) {
         });
 });
 $(document).on("pageshow", "#page-index", function (e) {
-    reSetNavIcon((pageSymble = "index"));
-    if (pageStatus) {
+    ResetNavIcon((UIStatus.pageSymble = "index"));
+    if (UIStatus.pageStatus) {
         null !== Engine.g_pInstance && Start();
     }
     $("#search-go").show();
 });
 $(document).on("pageinit", "#page-expert", function (e) {
-    reSetNavIcon((pageSymble = "expert"));
+    ResetNavIcon((UIStatus.pageSymble = "expert"));
     var t = new Date().valueOf();
-    "null" != JSON.stringify(mGetItem("page-expert")) &&
-        parseInt(mGetItem("page-expert-time")) > t - http_cache_time ?
-        (renderExpertList(mGetItem("page-expert")),
+    "null" != JSON.stringify(GetLocationItem("page-expert")) &&
+        parseInt(GetLocationItem("page-expert-time")) > t - SystemStatus.HttpCacheTime ?
+        (RenderExpertList(GetLocationItem("page-expert")),
             console.info("读取专家[科室]列表缓存")) :
         ($.ajax({
             type: "get",
@@ -1139,9 +1078,9 @@ $(document).on("pageinit", "#page-expert", function (e) {
             success: function (e) {
                 e
                     ?
-                    (renderExpertList(e),
-                        mSetItem("page-expert", e),
-                        mSetItem("page-expert-time", new Date().valueOf())) :
+                    (RenderExpertList(e),
+                        SetLocationItem("page-expert", e),
+                        SetLocationItem("page-expert-time", new Date().valueOf())) :
                     console.info("请求数据出错.");
             },
             error: function (e) {
@@ -1151,14 +1090,14 @@ $(document).on("pageinit", "#page-expert", function (e) {
             console.info("请求专家[科室]列表数据"));
 });
 $(document).on("pageshow", "#page-dep-detail", function (e) {
-    reSetNavIcon((pageSymble = "departments"));
-    var t = mGetItem("paramID");
+    ResetNavIcon((UIStatus.pageSymble = "departments"));
+    var t = GetLocationItem("paramID");
     $.ajax({
         type: "get",
         url: SVE_H5_URL + "api/info/getcompanyinfoH5.php?id=" + t,
         async: !0,
         success: function (e) {
-            e ? renderDepDetail(e) : console.info("请求数据出错.");
+            e ? RenderDepDetail(e) : console.info("请求数据出错.");
         },
         error: function (e) {
             console.warn("get page-dep-detail data error: " + e);
@@ -1170,14 +1109,14 @@ $(document).on("pagebeforeshow", "#page-dep-detail", function () {
     $("#page-dep-detail .img-container img").attr("src", "images/hospital_img.jpg")
 });
 $(document).on("pageshow", "#page-expert-list", function (e) {
-    reSetNavIcon((pageSymble = "expert"));
-    var t = mGetItem("paramID");
+    ResetNavIcon((UIStatus.pageSymble = "expert"));
+    var t = GetLocationItem("paramID");
     $.ajax({
         type: "get",
         url: SVE_H5_URL + "api/info/getExpertListH5.php?departmentId=" + t,
         async: !0,
         success: function (e) {
-            e ? renderExpertList(e) : console.info("请求数据出错.");
+            e ? RenderExpertList(e) : console.info("请求数据出错.");
         },
         error: function (e) {
             console.info("get page-expert-list data error: " + e);
@@ -1205,14 +1144,14 @@ $(document).on("pageshow", "#page-expert-list", function (e) {
     });
 });
 $(document).on("pageshow", "#page-expert-detail", function (e) {
-    reSetNavIcon((pageSymble = "expert"));
-    var t = mGetItem("paramID");
+    ResetNavIcon((UIStatus.pageSymble = "expert"));
+    var t = GetLocationItem("paramID");
     $.ajax({
         type: "get",
         url: SVE_H5_URL + "api/info/getExpertInfoH5.php?ID=" + t,
         async: !0,
         success: function (e) {
-            e ? renderExpertDetail(e) : console.info("请求数据出错.");
+            e ? RenderExpertDetail(e) : console.info("请求数据出错.");
         },
         error: function (e) {
             console.warn("get expert detail error: " + e);
@@ -1221,13 +1160,13 @@ $(document).on("pageshow", "#page-expert-detail", function (e) {
         console.info("请求专家详情数据");
 });
 $(document).on("pagehide", "#page-index", function (e) {
-    closeLeftSide();
-    if (pageStatus) {
+    CloseLeftSide();
+    if (UIStatus.pageStatus) {
         null !== Engine.g_pInstance && Stop();
     }
 });
 $(document).on("pagehide", "#page-self-service", function (e) {
-    closePartSide(), closeModelSide();
+    ClosePartSide(), CloseModelSide();
 });
 $(document).on("pageshow", "#page-expert", function () {
     new LazyLoadImg({
@@ -1274,16 +1213,16 @@ $(document).on("pageshow", "#page-departments", function () {
     });
 });
 $(document).on("pageshow", "#page-self-service", function () {
-    reSetNavIcon((pageSymble = "self")), initPeoplePic();
+    ResetNavIcon((UIStatus.pageSymble = "self")), InitPeoplePic();
 });
 $(document).on("pageinit", "#page-self-service", function () {
     $("#page-self-service .person-model img").attr("src", "images/male_face.jpg")
 });
 $(document).on("pageinit", "#page-sheshi", function () {
     var e = new Date().valueOf();
-    "null" != JSON.stringify(mGetItem("base-Toilet-list")) &&
-        parseInt(mGetItem("base-Toilet-list-time")) > e - http_cache_time ?
-        (Initsheshi(mGetItem("base-Toilet-list")),
+    "null" != JSON.stringify(GetLocationItem("base-Toilet-list")) &&
+        parseInt(GetLocationItem("base-Toilet-list-time")) > e - SystemStatus.HttpCacheTime ?
+        (Initsheshi(GetLocationItem("base-Toilet-list")),
             console.info("读取基础设施信息缓存")) :
         $.ajax({
             type: "get",
@@ -1293,8 +1232,8 @@ $(document).on("pageinit", "#page-sheshi", function () {
                 e
                     ?
                     (Initsheshi(e),
-                        mSetItem("base-Toilet-list", e),
-                        mSetItem("base-Toilet-list-time", new Date().valueOf())) :
+                        SetLocationItem("base-Toilet-list", e),
+                        SetLocationItem("base-Toilet-list-time", new Date().valueOf())) :
                     console.info("请求数据出错.");
             },
             error: function (e) {
@@ -1316,16 +1255,11 @@ $(document).on("pageinit", "#page-sheshi", function () {
                     "室外卫生间" +
                     '</span><span class="fold-icon"><span class="icon-chevron-thin-down"></span></span></div><div class="panel-body" style="display: none">';
                 for (var n = 0; n < 2; n++)
-                    s +=
-                        '<span roomid="' + i[n].roomID + '">' + i[n].roomName + "</span>";
+                    s +='<span roomid="' + i[n].roomID + '">' + i[n].roomName + "</span>";
                 s += "</div></div>";
-                s +=
-                    '<div class="pannel"><div class="panel-head"><span class="title">' +
-                    "室内卫生间" +
-                    '</span><span class="fold-icon"><span class="icon-chevron-thin-down"></span></span></div><div class="panel-body" style="display: none">';
+                s +='<div class="pannel"><div class="panel-head"><span class="title">' +"室内卫生间" +'</span><span class="fold-icon"><span class="icon-chevron-thin-down"></span></span></div><div class="panel-body" style="display: none">';
                 for (var n = 2; n < i.length; n++)
-                    s +=
-                        '<span roomid="' + i[n].roomID + '">' + i[n].roomName + "</span>";
+                    s +='<span roomid="' + i[n].roomID + '">' + i[n].roomName + "</span>";
                 s += "</div></div>";
             }
         (s += "</div>"), $(".search-list-toilet").append(s);
@@ -1335,7 +1269,7 @@ $(document).on("pageinit", "#page-sheshi", function () {
 });
 $(document).on("click", ".self-sex-tag li", function () {
     $(this).addClass("self-tag-current").removeClass("self-tag-normal").siblings().removeClass("self-tag-current").addClass("self-tag-normal"),
-        changePicModel();
+        ChangePicModel();
 });
 $(document).on("touchstart", ".self-head-tag", function () {
     window.history.replaceState({
@@ -1352,9 +1286,9 @@ $(document).on("touchstart", ".self-head-tag", function () {
         ),
         $("#self-part-slide").scrollTop(0);
     var e = new Date().valueOf();
-    "null" != JSON.stringify(mGetItem("body-info")) &&
-        parseInt(mGetItem("body-info-time")) > e - http_cache_time ?
-        (renderSelfPartSlide(mGetItem("body-info")),
+    "null" != JSON.stringify(GetLocationItem("body-info")) &&
+        parseInt(GetLocationItem("body-info-time")) > e - SystemStatus.HttpCacheTime ?
+        (RenderSelfPartSlide(GetLocationItem("body-info")),
             console.info("读取人体部位列表缓存")) :
         ($.ajax({
             type: "get",
@@ -1363,9 +1297,9 @@ $(document).on("touchstart", ".self-head-tag", function () {
             success: function (e) {
                 e
                     ?
-                    (renderSelfPartSlide(e),
-                        mSetItem("body-info", e),
-                        mSetItem("body-info-time", new Date().valueOf())) :
+                    (RenderSelfPartSlide(e),
+                        SetLocationItem("body-info", e),
+                        SetLocationItem("body-info-time", new Date().valueOf())) :
                     console.info("请求数据出错.");
             },
             error: function (e) {
@@ -1412,11 +1346,7 @@ $(document).on("touchstart", "#self-part-slide ul li", function () {
                             "</li>";
                     t.after(a),
                         i &&
-                        $("#self-part-slide").animate({
-                            scrollTop: $("#self-part-slide").height()
-                        },
-                            "fast"
-                        );
+                        $("#self-part-slide").animate({scrollTop: $("#self-part-slide").height()},"fast");
                 },
                 error: function (e) {
                     console.warn("get self-part-sub-data error: " + e);
@@ -1437,7 +1367,7 @@ $(document).on("click", ".self-part-sub", function () {
         success: function (e) {
             e
                 ?
-                ($("#self-sickness-slide").show(), renderSicknessSlide(e)) :
+                ($("#self-sickness-slide").show(), RenderSicknessSlide(e)) :
                 console.info("请求数据出错.");
         },
         error: function (e) {
@@ -1446,20 +1376,15 @@ $(document).on("click", ".self-part-sub", function () {
     });
 });
 $(document).on("click", "#self-sickness-slide li", function () {
-    closePartSide(), $("#self-sickness-slide").hide();
+    ClosePartSide(), $("#self-sickness-slide").hide();
     var e = $(this).attr("dataid"),
-        t = JSON.parse(mGetItem("sickness")),
+        t = JSON.parse(GetLocationItem("sickness")),
         a = null,
         i = '<li class="list-head">自助导诊结果</li>';
     for (var s in t)
         if (t[s].ID == e) {
             for (var o in (a = t[s].RoomList))
-                i +=
-                    '<li><span class="self-advice"><span>建议科室：</span><span class="room-name">' +
-                    a[o].Room_Name +
-                    '</span></span><div class="self-go"><span dataid="' +
-                    a[o].Room_ID +
-                    '" class="self-go-ahead">直达科室</span></div></li>';
+                i +='<li><span class="self-advice"><span>建议科室：</span><span class="room-name">' +a[o].Room_Name +'</span></span><div class="self-go"><span dataid="' +a[o].Room_ID +'" class="self-go-ahead">直达科室</span></div></li>';
             i += '<div class="self-result-content">' + t[s].Content + "</div>";
         }
     $("#page-self-service-rusult ul").html(i);
@@ -1472,7 +1397,7 @@ $(document).on("touchstart", "#self-model-slide ul li", function () {
         url: SVE_H5_URL + "api/info/getSicknessList.php?Id=" + e,
         async: !0,
         success: function (e) {
-            e ? ($("#self-illness-slide").show(), renderSelfIllnessSlide(e)) : console.log("请求数据出错.")
+            e ? ($("#self-illness-slide").show(), RenderSelfIllnessSlide(e)) : console.log("请求数据出错.")
         },
         error: function (e) {
             console.warn("get self-illness-data error: " + e);
@@ -1481,30 +1406,25 @@ $(document).on("touchstart", "#self-model-slide ul li", function () {
 });
 $(document).on("click", "#self-illness-slide ul li", function () {
     var e = $(this).attr("dataid");
-    closeModelSide(), $("#self-illness-slide").hide();
-    var t = JSON.parse(mGetItem("illness")),
+    CloseModelSide(), $("#self-illness-slide").hide();
+    var t = JSON.parse(GetLocationItem("illness")),
         a = '<li class="list-head">自助导诊结果</li>',
         i = null;
     for (var s in t)
         if (t[s].ID == e) {
             for (var o in (i = t[s].RoomList))
-                a +=
-                    '<li><span class="self-advice"><span>建议科室：</span><span class="room-name">' +
-                    i[o].Room_Name +
-                    '</span></span><div class="self-go"><span dataid="' +
-                    i[o].Room_ID +
-                    '" class="self-go-ahead">直达科室</span></div></li>';
+                a +='<li><span class="self-advice"><span>建议科室：</span><span class="room-name">' +i[o].Room_Name +'</span></span><div class="self-go"><span dataid="' +i[o].Room_ID +'" class="self-go-ahead">直达科室</span></div></li>';
             a += '<div class="self-result-content">' + t[s].Content + "</div>";
         }
     $("#page-self-service-rusult ul").html(a);
 });
 $(document).on("pageshow", "#page-self-service-rusult", function () {
-    reSetNavIcon((pageSymble = "self")),
+    ResetNavIcon((UIStatus.pageSymble = "self")),
         console.info("enter page-self-service-rusult.");
 });
 $(document).on("pagehide", "#page-self-service", function () {
-    closePartSide(),
-        closeModelSide(),
+    ClosePartSide(),
+        CloseModelSide(),
         $("#self-illness-slide").hide(),
         $("#self-sickness-slide").hide();
 });
@@ -1526,7 +1446,7 @@ $(document).on("touchstart", "#page-self-service map area", function (e: any) {
         url: SVE_H5_URL + "api/info/getSymptomList.php?bodyId=" + i + "&sex=" + e,
         async: !0,
         success: function (e) {
-            e ? renderSelfModelSlide(e) : console.info("请求数据出错.");
+            e ? RenderSelfModelSlide(e) : console.info("请求数据出错.");
         },
         error: function (e) {
             console.warn("get self-part-data error: " + e);
@@ -1578,45 +1498,21 @@ $(document).on("click", ".reversal", function () {
             i +=
                 '<div class="person-model">\n\t\t\t\t\t\t  <img src="images/child_female_face.jpg" alt="" width="1080" height="1920" usemap="#Map"/>\n\t\t\t\t\t\t  <map name="Map" id="Map">\n                            <area dataid="toubu" alt="" title="" href="#头部" shape="poly" coords="615,515,547,540,492,526,461,509,445,474,421,439,414,496,420,556,380,622,378,534,381,494,367,440,372,325,388,300,410,304,439,263,485,238,541,222,578,233,623,252,654,281,668,301,688,302,706,324,711,359,704,408,702,455,704,504,707,582,707,596,707,606,712,619,661,564,666,512,677,484,664,444,638,475" />\n                            <area dataid="yanjingbu" alt="" title="" href="#咽颈部" shape="poly" coords="505,533,505,549,505,564,476,583,460,588,444,591,491,593,533,593,574,592,609,590,636,590,589,565,579,545,576,535,557,540,534,543" />\n                            <area dataid="xiongbu" alt="" title="" href="#胸部" shape="poly" coords="414,618,436,650,442,671,450,758,469,764,533,770,584,773,627,759,634,744,642,659,649,645,664,614,649,599,626,596,543,597,484,599,442,599,429,603" />\n                            <area dataid="fubu" alt="" title="" href="#腹部" shape="poly" coords="436,852,451,802,451,765,462,767,485,771,514,774,538,777,571,777,595,778,612,771,626,765,633,762,634,784,640,829,646,854,662,889,670,929,618,946,549,952,490,952,447,941,418,931,416,919" />\n                            <area dataid="shengzhibuwei" alt="" title="" href="#生殖部位" shape="poly" coords="412,933,435,941,466,951,488,955,574,959,614,953,667,937,672,936,673,997,671,1037,668,1064,668,1079,622,1087,571,1087,552,1052,542,1037,531,1048,522,1059,513,1085,502,1093,463,1087,416,1078" />\n                            <area dataid="tuibu" alt="" title="" href="#腿部" shape="poly" coords="469,1573,449,1494,438,1418,432,1334,435,1275,424,1223,416,1141,415,1084,441,1091,490,1099,512,1097,575,1095,612,1094,667,1086,666,1133,663,1221,655,1273,649,1336,648,1409,618,1564,616,1608,633,1662,613,1692,580,1691,557,1638,554,1584,562,1539,564,1472,570,1367,567,1279,569,1187,570,1097,510,1099,514,1291,521,1546,528,1599,527,1635,515,1668,508,1692,472,1695,458,1680,452,1660" />\n                            <area dataid="shoubu" alt="" title="" href="#手部" shape="poly" coords="409,622,424,642,437,671,441,709,445,748,425,790,395,835,357,908,312,987,319,995,311,1020,301,1039,269,1040,255,1048,236,1038,239,990,253,975,307,857,346,805" />\n                            <area dataid="shoubu" alt="" title="" href="#手部" shape="poly" coords="672,614,687,666,701,721,721,764,742,815,784,876,810,929,828,976,843,988,846,1018,844,1033,820,1044,810,1038,780,1035,761,993,772,987,752,949,638,747,644,675,653,648" />\n                         </map>\n\t\t\t\t\t    </div>';
     }
-    $("#page-self-service .container").html(i), initPeoplePic();
+    $("#page-self-service .container").html(i), InitPeoplePic();
 });
-$("#page-departments .departments_list a").live("click", function () {
-    mSetItem("paramID", $(this).attr("data-id"));
+$("#page-departments .departments_list a").on("click", function () {
+    SetLocationItem("paramID", $(this).attr("data-id"));
 });
-$("#page-expert .departments_list a").live("click", function () {
-    mSetItem("paramID", $(this).attr("data-id"));
+$("#page-expert .departments_list a").on("click", function () {
+    SetLocationItem("paramID", $(this).attr("data-id"));
 });
-$("#page-expert-list .expert_list a").live("click", function () {
-    mSetItem("paramID", $(this).attr("data-id"));
+$("#page-expert-list .expert_list a").on("click", function () {
+    SetLocationItem("paramID", $(this).attr("data-id"));
 });
-
-var initStatus = !1,
-    cache_start_point = "cache-start-point",
-    cache_end_point = "cache-end-point",
-    cacheType = cache_start_point,
-    isStartInput = !0,
-    isNavSuccess = !0,
-    isNowNavigating = !1,
-    defaultStart = "default-start-point",
-    compass = $(".compass").get(0),
-    oBeancons = null,
-    animates = {
-        type0: "0",
-        type1: "1",
-        type2: "2",
-        type3: "3",
-        type4: "4",
-        type5: "5",
-        type6: "6",
-        type7: "7"
-    },
-    current_floor = null;
 
 /// 文字转换语音
 function l(e) {
-    var t,
-        a,
-        i = "";
+    var t,a,i = "";
     /**图标控制（toast和弹出框的） */
     if (e[e.length - 1].indexOf("转") != -1) {
         switch (e[e.length - 1]) {
@@ -1640,15 +1536,15 @@ function l(e) {
                 $("#Info-Img").attr("src", "images/ts.png");
                 $("#msgBox img").attr("src", "images/ts.png");
                 break;
-        }!lockFlag && showMsg(e[e.length - 1], 2000);
-        LockIcon = true;
+        }!SceneStatus.lockFlag && ShowMsg(e[e.length - 1], 2000);
+        UIStatus.lockIcon = true;
     } else if (e[e.length - 2] == "进入" || e[e.length - 1] == "抵达终点") {
         $("#Info-Img").attr("src", "images/ex.png");
-        !lockFlag && showMsg(e[e.length - 2], 2000);
-        LockIcon = true;
+        !SceneStatus.lockFlag && ShowMsg(e[e.length - 2], 2000);
+        UIStatus.lockIcon = true;
     }
     for (var s in e)
-        null == mGetItem("v" + e[s]) &&
+        null == GetLocationItem("v" + e[s]) &&
             (null == e[s] && (e[s] = "位置点"), (i += e[s] + ","));
     (i = i.substr(0, i.length - 1)),
         (a = e),
@@ -1661,7 +1557,7 @@ function l(e) {
                     if (e) {
                         var t = JSON.parse(e).response;
                         for (var i in t)
-                            mSetItem(
+                            SetLocationItem(
                                 "v" + t[i].key_name,
                                 "data:audio/mp3;base64," + t[i].mp3_url
                             );
@@ -1674,33 +1570,88 @@ function l(e) {
             });
 }
 
+/**
+ * 语音播放
+ * @param e texts 文字片段
+ */
 function r(e) {
     var t = 0;
     e.length > 0 &&
-        ((audio.currentTime = 0),
-            audio.pause(),
-            (audio.src = mGetItem("v" + e[t])),
+        ((UIStatus.audio[0].currentTime = 0),
+            UIStatus.audio[0][0].pause(),
+            (UIStatus.audio[0]['src'] = GetLocationItem("v" + e[t])),
             console.info("开始播放."),
             ++t,
             Engine.g_pInstance.m_pProject.VoiceStart(),
             setTimeout(function () {
-                audio.play();
+                UIStatus.audio[0].play();
             }, 0)),
-        (audio.onended = function () {
+        (UIStatus.audio[0].onended = function () {
             t < e.length ?
-                ((audio.currentTime = 0),
-                    audio.pause(),
-                    (audio.src = mGetItem("v" + e[t])),
+                ((UIStatus.audio[0].currentTime = 0),
+                    UIStatus.audio[0].pause(),
+                    (UIStatus.audio[0].src = GetLocationItem("v" + e[t])),
                     ++t,
                     setTimeout(function () {
-                        audio.play();
+                        UIStatus.audio[0].play();
                     }, 0)) :
                 Engine.g_pInstance.m_pProject.VoiceEnd();
         });
 }
 
 $(function () {
-    function c(e) {
+    (UIStatus.DocumentEvent = function () {
+        var e = JSON.parse(GetLocationItem(UIStatus.defaultStart));
+        e && SetStartPoint(e.id, e.name, "defaultStart");
+    }),
+        (function (e) {
+            var t = new Date().valueOf();
+            if ("null" != JSON.stringify(GetLocationItem("room-list")) &&parseInt(GetLocationItem("room-list-time")) > t - SystemStatus.HttpCacheTime) {
+                var a = JSON.parse(GetLocationItem("room-list")).response;
+                e(a), console.info("读取房间列表缓存");
+            } else {
+                $.ajax({
+                    type: "get",
+                    url: SVE_H5_URL + "/api/info/getroomlistH5.php",
+                    async: !0,
+                    success: function (t) {
+                        t?(e(JSON.parse(t).response),SetLocationItem("room-list", t),SetLocationItem("room-list-time", new Date().valueOf())) :console.info("请求数据出错.");
+                    },
+                    error: function (e) {
+                        console.warn("get room list error: " + e);
+                    }
+                }),
+                    console.info("请求房间列表数据");
+            }
+        })(function (t) {
+            GLOBAL.Action.pMajorProgress = FloorControll;
+            GLOBAL.Action.pMinorProgress = TopcBar;
+            GLOBAL.Action.pLayerListFlush = ReLoadFloor;
+            GLOBAL.Action.pPathDataFeedback = LoadHisPath;
+            GLOBAL.Action.pOutsideSwich = ChangedSceenType;
+            GLOBAL.Action.pViewSwich = ChangeDimType;
+            GLOBAL.Action.pLayerActive = ChooseFloor;
+            GLOBAL.Action.pPathNotFound = NotFoundRoute;
+            GLOBAL.Action.pCompassUpdate = ActCompass;
+            GLOBAL.Action.pCursorInfo = ChooseSetPoint;
+            GLOBAL.Action.pChickTouchMove = HideSetPoint;
+            GLOBAL.Action.pHintFeedback = l;
+            GLOBAL.Action.pGetAnimateType = PlayAnimate;
+            GLOBAL.Action.pLayerShow = ShowActiveFloor;
+
+            GLOBAL.Action.pProjectEnd = function () {
+                Engine.g_pInstance.m_pCameraCtrl.LineWidth = function () {
+                    return 50;
+                };
+                initParam();
+            }
+            Init3D(function (t) {
+                null === t && (Start(), UIStatus.DocumentEvent(), (UIStatus.initStatus = !0));
+            });
+        }),
+        (UIStatus.voiceEle = document.getElementById("voice"))["play"]();
+    
+    function PlayAnimate(e) {
         console.info("播放动画：" + e),
             (function (e, t) {
                 t = isNaN(t) ? 2e3 : t;
@@ -1724,123 +1675,27 @@ $(function () {
         MiaokitDC.DC.m_nCurWork != 0 ? SwitchScene(null) : SwitchScene("体育场");
     });
 
-    var e,
-        t,
-        a,
-        i = $(window).width(),
-        s = $(window).height();
-
-    function n() {
-        isNavSuccess = !1;
+    /**
+     * 未找到线路时返回
+     */
+    function NotFoundRoute() {
+        UIStatus.isNavSuccess = !1;
     }
 
-    (e = function () {
-        wx.ready(function () {
-            var e;
-            (e = location.protocol + "://" + window.location.host),
-                wx.onMenuShareAppMessage({
-                    title: "龙岩人民医院",
-                    desc: "龙岩人民医院，是集医疗、预防、教学、科研、康复、保健于一体的大型综合性医院",
-                    link: e + "/h5/index.html",
-                    imgUrl: e + "/favicon.ico",
-                    success: function () { },
-                    cancel: function () { }
-                }),
-                wx.onMenuShareTimeline({
-                    title: "龙岩人民医院",
-                    link: e + "/h5/index.html",
-                    imgUrl: e + "/favicon.ico",
-                    success: function () { },
-                    cancel: function () { }
-                }),
-                wx.onMenuShareQQ({
-                    title: "龙岩人民医院",
-                    desc: "龙岩人民医院，是集医疗、预防、教学、科研、康复、保健于一体的大型综合性医院",
-                    link: e + "/h5/index.html",
-                    imgUrl: e + "/favicon.ico",
-                    success: function () { },
-                    cancel: function () { }
-                });
-        }),
-            wx.error(function (e) {
-                alert(e.errMsg);
-            });
-        var e = JSON.parse(mGetItem(defaultStart));
-        e && setStartPoint(e.id, e.name, "defaultStart");
-    }),
-        (function (e) {
-            var t = new Date().valueOf();
-            if (
-                "null" != JSON.stringify(mGetItem("room-list")) &&
-                parseInt(mGetItem("room-list-time")) > t - http_cache_time
-            ) {
-                var a = JSON.parse(mGetItem("room-list")).response;
-                e(a), console.info("读取房间列表缓存");
-            } else {
-                $.ajax({
-                    type: "get",
-                    url: SVE_H5_URL + "/api/info/getroomlistH5.php",
-                    async: !0,
-                    success: function (t) {
-                        t
-                            ?
-                            (e(JSON.parse(t).response),
-                                mSetItem("room-list", t),
-                                mSetItem("room-list-time", new Date().valueOf())) :
-                            console.info("请求数据出错.");
-                    },
-                    error: function (e) {
-                        console.warn("get room list error: " + e);
-                    }
-                }),
-                    console.info("请求房间列表数据");
-            }
-        })(function (t) {
-            GLOBAL.Action.pMajorProgress = g;
-            GLOBAL.Action.pMinorProgress = v;
-            GLOBAL.Action.pLayerListFlush = u;
-            GLOBAL.Action.pPathDataFeedback = m;
-            GLOBAL.Action.pOutsideSwich = w;
-            GLOBAL.Action.pViewSwich = S;
-            GLOBAL.Action.pLayerActive = p;
-            GLOBAL.Action.pPathNotFound = n;
-            GLOBAL.Action.pCompassUpdate = I;
-            GLOBAL.Action.pCursorInfo = C;
-            GLOBAL.Action.pChickTouchMove = N;
-            GLOBAL.Action.pHintFeedback = l;
-            GLOBAL.Action.pGetAnimateType = c;
-            GLOBAL.Action.pLayerShow = h;
-            GLOBAL.Action.pProjectEnd = function () {
-                Engine.g_pInstance.m_pCameraCtrl.LineWidth = function () {
-                    return 50;
-                };
-                initParam();
-                //InitCustomModel(g_pConfig3d.m_pCustomModelInfo, function () {});
-            }
-            // GLOBAL.Action.pOnClick = function pOnClick(pPoint) {
-            //     console.log(pPoint)
-            // }
-            Init3D(function (t) {
-                null === t && (Start(), e(), (initStatus = !0));
-            });
-        }),
-        (t = "voice"),
-        (a = document.getElementById(t))["play"]();
-    document.addEventListener(
-        "WeixinJSBridgeReady",
-        function () {
-            a.play();
-        },
-        !1
-    );
-    var d = 0;
-
-    function p(e) {
-        (d = f), $(".floor_box ul").scrollTop(d * (e - 1));
+    /**
+     * 列表滚动的距离
+     * @param e 当前楼层索引
+     */
+    function ChooseFloor(e) {
+        (UIStatus.floorBoxHeight = UIStatus.floorBoxInitHeight), $(".floor_box ul").scrollTop(UIStatus.floorBoxHeight * (e - 1));
     }
 
-    function u(e, t) {
-
+    /**
+     * 切换楼宇重载楼层
+     * @param e 
+     * @param t 
+     */
+    function ReLoadFloor(e, t) {
         /**--end-- */
         let o: any = "";
         if (GLOBAL.pCurBuilding) {
@@ -1848,11 +1703,9 @@ $(function () {
                 o += "<li house-id='" + t + "' layer-id='" + n + "'>" + GLOBAL.pCurBuilding.layerList[n].floor_name + "</li>";
         }
 
-        $(".floor_box ul").html(o),
-            (a = 0),
-            (i = 0),
-            (s = 0),
-            $(".floor_box ul li").unbind("click").bind("click", function (e: JQueryEventObject, t = undefined): any {
+        $(".floor_box ul").html(o);
+        let a = 0,i = 0,s = 0;
+            $(".floor_box ul li").unbind("click").bind("click", function (e, t = undefined): any {
                 o = $(".floor_box ul li").index($(this));
                 var floor = $(this).text(),
                     n = $(this).attr("house-id");
@@ -1865,7 +1718,7 @@ $(function () {
                                 $(this).hasClass("current-active-floor") && (s = e);
                             }),
                             $(".floor_box ul").children("li").each(function (e) {
-                                Math.abs($(this).position().top) < (2 * f) / 3 &&
+                                Math.abs($(this).position().top) < (2 * UIStatus.floorBoxInitHeight) / 3 &&
                                     ($(this).addClass("top"),
                                         (i = (a = e) + 3),
                                         $(".floor_box ul li").eq(i).addClass("bottom").siblings().removeClass("bottom"),
@@ -1902,13 +1755,17 @@ $(function () {
 
                 return 0;
             });
-        (f = $(".floor_box ul li:first").outerHeight(!0));
+        (UIStatus.floorBoxInitHeight = $(".floor_box ul li:first").outerHeight(!0));
     }
 
+    /**
+     * 激活楼层添加激活状态
+     * @param e 楼层索引
+     * @param i 路线索引
+     */
+    function ShowActiveFloor(e, i) {
 
-    function h(e, i) {
-
-        current_floor = e;
+        SceneStatus.current_floor = e;
         if (e.PId == "山西体育中心") {
             $("#select-add").text("进入室内");
             GLOBAL.pCurBuilding = null;
@@ -1922,20 +1779,18 @@ $(function () {
             }
         }
 
-        var t = getByteLen(e.PId) / 2 + 1;
+        var t = GetByteLen(e.PId) / 2 + 1;
         $(".current-address .current-point").css("width", t + "em"),
             $(".current-address .current-point").text(e.PId),
-            $(".floor_box ul li")
-                .eq(current_floor.LayerId)
-                .trigger("click", {
+            $(".floor_box ul li").eq(SceneStatus.current_floor.LayerId).trigger("click", {
                     type: "noNeedActive"
                 }),
             //$(".history-rollback-wrapper ul li").eq(NNavigation.g_nActiveLayerPath).trigger("click");
             $(".history-rollback-wrapper ul li").each(function () {
                 if (i) {
                     let rollbackflag = true;
-                    current_floor.LayerId == $(this).attr("layer-id") &&
-                        current_floor.HousId == $(this).attr("house-id") && (i == $(this).index()) &&
+                    SceneStatus.current_floor.LayerId == $(this).attr("layer-id") &&
+                        SceneStatus.current_floor.HousId == $(this).attr("house-id") && (i == $(this).index()) &&
                         ($(this).trigger("click", {
                             type: "noNeedActive"
                         }), rollbackflag = false);
@@ -1944,8 +1799,8 @@ $(function () {
                     }
                 } else {
                     let rollbackflag = true;
-                    current_floor.LayerId == $(this).attr("layer-id") &&
-                        current_floor.HousId == $(this).attr("house-id") && (!NNavigation.ng_nActiveLayerPath || NNavigation.ng_nActiveLayerPath == $(this).index()) &&
+                    SceneStatus.current_floor.LayerId == $(this).attr("layer-id") &&
+                        SceneStatus.current_floor.HousId == $(this).attr("house-id") && (!NNavigation.ng_nActiveLayerPath || NNavigation.ng_nActiveLayerPath == $(this).index()) &&
                         ($(this).trigger("click", {
                             type: "noNeedActive"
                         }), rollbackflag = false);
@@ -1961,11 +1816,11 @@ $(function () {
         let curPath;
         if (NNavigation.g_pActiveList.length > 0) {
             curPath = NNavigation.g_pActiveList[0].m_nCurPath;
-            if (Posfault) {
+            if (PLocationStatus.posFault) {
                 let lastPoint = NNavigation.g_pActiveList[0].m_aPath[curPath].m_pEndPoint.m_mPosition;
-                endX = lastPoint.x;
-                endY = lastPoint.y;
-                if (Posfault && lockFlag && !NNavigation.TipMessage) {
+                PLocationStatus.endX = lastPoint.x;
+                PLocationStatus.endY = lastPoint.y;
+                if (PLocationStatus.posFault && SceneStatus.lockFlag && !NNavigation.TipMessage) {
                     NNavigation.TipMessage = function (message) {
                         ToastShow(message);
                     };
@@ -1973,7 +1828,7 @@ $(function () {
                 }
             }
             let cachePOS = new Vector3(NNavigation.g_pActiveList[0].m_aPath[curPath].m_aPath[0].x, 0, -NNavigation.g_pActiveList[0].m_aPath[curPath].m_aPath[0].z);
-            if (!lockFlag) {
+            if (!SceneStatus.lockFlag) {
                 if (MiaokitDC.DC.m_nCurWork == 0) {
                     setTimeout(() => {
                         SetCamera(cachePOS, undefined, undefined, 400);
@@ -1997,7 +1852,7 @@ $(function () {
         }
     }
 
-    function getbuildname() {
+    function Getbuildname() {
         var e = "";
         for (var t in MiaokitDC.DC.m_aWork)
             0 == MiaokitDC.DC.m_aWork[t].m_nIndex &&
@@ -2022,7 +1877,7 @@ $(function () {
         });
     }
 
-    function m(e) {
+    function LoadHisPath(e) {
         var t = "";
         for (var a in e) {
             if (e[a].HousId == 0) {
@@ -2038,13 +1893,12 @@ $(function () {
             $(".history-rollback-wrapper").css("display", "flex");
         iconup($(".search_direction_box").height());
     }
-    var f = 0;
 
-    function g(e, t) {
+    function FloorControll(e, t) {
         if (!e) {
             //FilterPOI(true, new Vector3(0, 0, 0), 100, [0, 3, 9]);
             //timeout然后开始导航
-            setTimeout(getbuildname, 200);
+            setTimeout(Getbuildname, 200);
             /**新加载方式 重新制定链接导航方案 */
             setTimeout(DefaultNav, 200);
             // SwitchScene("山西体育中心");
@@ -2052,11 +1906,11 @@ $(function () {
             if (code) {
                 getCode(code);
             }
-            pageStatus = true;
+            UIStatus.pageStatus = true;
             MiaokitDC.DC.m_pNavigator.Link();
-            if (Froomloc != "") {
+            if (NavigationStatus.toRoomid != "") {
                 setTimeout(function () {
-                    findSta(Froomloc, buildName, floorName, Fevent);
+                    findSta(NavigationStatus.toRoomid, NavigationStatus.buildName, NavigationStatus.floorName, NavigationStatus.foundEvent);
                 }, 1000);
             }
             Engine.g_pInstance.m_pImageEnd = endIcon;
@@ -2065,17 +1919,26 @@ $(function () {
             (document.getElementById("processbar").style.width = 100 * t + "%");
     }
 
-    function v(e, t) {
+    /**
+     * 顶部进度条显示
+     * @param e if-show 
+     * @param t 百分比
+     */
+    function TopcBar(e, t) {
         e || $(".top-process").hide(),
             (document.getElementById("topprocessbar").style.width = 100 * t + "%");
     }
 
-    function b() {
-        document.activeElement["blur"](), $("#pop-input-start").removeClass("list-bg");
+    /**
+     * 分类显示路点
+     */
+    function PopUpSearchUi() {
+        document.activeElement["blur"]();
+        $("#pop-input-start").removeClass("list-bg");
         var e = new Date().valueOf();
-        "null" != JSON.stringify(mGetItem("base-position-list")) &&
-            parseInt(mGetItem("base-position-list-time")) > e - http_cache_time ?
-            (y(mGetItem("base-position-list")),
+        "null" != JSON.stringify(GetLocationItem("base-position-list")) &&
+            parseInt(GetLocationItem("base-position-list-time")) > e - SystemStatus.HttpCacheTime ?
+            (RenderBasePosition(GetLocationItem("base-position-list")),
                 console.info("读取基础设施信息缓存")) :
             $.ajax({
                 type: "get",
@@ -2084,9 +1947,9 @@ $(function () {
                 success: function (e) {
                     e
                         ?
-                        (y(e),
-                            mSetItem("base-position-list", e),
-                            mSetItem("base-position-list-time", new Date().valueOf())) :
+                        (RenderBasePosition(e),
+                            SetLocationItem("base-position-list", e),
+                            SetLocationItem("base-position-list-time", new Date().valueOf())) :
                         console.info("请求数据出错.");
                 },
                 error: function (e) {
@@ -2095,38 +1958,30 @@ $(function () {
             });
     }
 
-    function y(e) {
+    function RenderBasePosition(e) {
         var t = JSON.parse(e).response,
             a = '<div class="basePosition">';
         for (var i in t)
             t[i].iconUrl &&
                 (a +=
-                    '<div sort-id="' +
-                    t[i].ID +
-                    '" class="base-item"><img src="../' +
-                    t[i].iconUrl +
-                    '" alt="基础设施"/><span class="base-text">' +
-                    t[i].HyName +
-                    "</span></div>");
+                    '<div sort-id="' +t[i].ID +'" class="base-item"><img src="../' +t[i].iconUrl +'" alt="基础设施"/><span class="base-text">' +t[i].HyName +"</span></div>");
         (a += "</div>"), $(".search-list").html(a);
 
         var s = new Date().valueOf();
-        "null" != JSON.stringify(mGetItem("page-departments")) &&
-            parseInt(mGetItem("page-departments-time")) > s - http_cache_time ?
-            (_((e = mGetItem("page-departments"))),
+        "null" != JSON.stringify(GetLocationItem("page-departments")) &&
+            parseInt(GetLocationItem("page-departments-time")) > s - SystemStatus.HttpCacheTime ?
+            (RenderSortPanels((e = GetLocationItem("page-departments"))),
                 console.info("读取科室列表缓存")) :
             $.ajax({
                 type: "get",
                 url: SVE_H5_URL + "api/info/getKeShilistH5.php",
                 async: !0,
                 success: function (e) {
-                    e
-                        ?
-                        (_(e),
-                            mSetItem("page-departments", e),
-                            mSetItem("page-departments-time", new Date().valueOf()),
-                            console.info("请求科室列表数据")) :
-                        console.info("请求数据出错.");
+                    e?(RenderSortPanels(e),
+                        SetLocationItem("page-departments", e),
+                        SetLocationItem("page-departments-time", new Date().valueOf()),
+                        console.info("请求科室列表数据")) :
+                    console.info("请求数据出错.");
                 },
                 error: function (e) {
                     console.warn("get page-departments data error: " + e);
@@ -2225,18 +2080,15 @@ $(function () {
         }
     }
 
-    function _(e) {
-        for (
-            var t = JSON.parse(e),
-            a = null,
-            i = null,
-            s = '<div class="panel-box">',
-            o = 0; o < t.response.length; o++
-        )
+    /**
+     * 渲染搜索结果
+     * @param e 待序列化string
+     */
+    function RenderSortPanels(e) {
+        for (var t = JSON.parse(e),a = null,i = null,s = '<div class="panel-box">',o = 0; o < t.response.length; o++)
             if ((i = (a = t.response[o]).roomChildList)) {
                 s +=
-                    '<div class="pannel"><div class="panel-head"><span class="title">' +
-                    a.roomName +
+                    '<div class="pannel"><div class="panel-head"><span class="title">' +a.roomName +
                     '</span><span class="fold-icon"><span class="icon-chevron-thin-down"></span></span></div><div class="panel-body" style="display: none">';
                 for (var n = 0; n < i.length; n++)
                     s +=
@@ -2246,34 +2098,23 @@ $(function () {
         (s += "</div>"), $(".search-list").append(s);
     }
 
-    function x(e, t) {
+    /**
+     * 根据输入查询位置点
+     * @param e 数据（位置点）列表
+     * @param t 键入关键词
+     */
+    function ShowFilterList(e, t) {
         var a = JSON.parse(e).response,
             i = null,
             s = "";
         for (var o in a)
             (i = a[o]),
-                ("" === t || i.roomName.indexOf(t) >= 0) &&
-                i.roomName.indexOf("楼梯") < 0 &&
-                "" != i.roomID &&
-                i.roomName.indexOf("电梯") < 0 &&
-                i.roomName.indexOf("卫生间") < 0 &&
+                ("" === t || i.roomName.indexOf(t) >= 0) &&i.roomName.indexOf("楼梯") < 0 &&"" != i.roomID &&i.roomName.indexOf("电梯") < 0 &&i.roomName.indexOf("卫生间") < 0 &&
                 ((s += "<li class='search-info' roomid='" + i.roomID + "'>"),
-                    (s +=
-                        "<span class='ico_addr'></span><span class='context'>" +
-                        i.roomName +
-                        "</span>"),
+                    (s +="<span class='ico_addr'></span><span class='context'>" +i.roomName +"</span>"),
                     "string" == typeof i.FloorID &&
-                    "" != i.FloorID &&
-                    (s +=
-                        "<span class='floor-num'>" +
-                        i.Building_ID +
-                        "-" +
-                        i.FloorID +
-                        "</span>"),
-                    (s += "</li>"));
-        "" === s &&
-            (s = "<li style='text-align: center;color: #999;'>无匹配信息.</li>"),
-            $(".search-list").html(s);
+                    "" != i.FloorID &&(s +="<span class='floor-num'>" +i.Building_ID +"-" +i.FloorID +"</span>"),(s += "</li>"));
+        "" === s &&(s = "<li style='text-align: center;color: #999;'>无匹配信息.</li>"),$(".search-list").html(s);
         $(".search-list .search-info").each(function () {
             $(this).bind("click", function () {
                 var lit = $(this).find(".floor-num").text().split("-");
@@ -2287,34 +2128,47 @@ $(function () {
                     if (MiaokitDC.DC.m_pNavigator.m_pSiteList != null) {
                         findSta($(this).attr("roomid"), FbuildName, FfloorName, "panel");
                     } else {
-                        Froomloc = $(this).attr("roomid");
-                        buildName = FbuildName;
-                        floorName = FfloorName;
-                        Fevent = "panel";
+                        NavigationStatus.toRoomid = $(this).attr("roomid");
+                        NavigationStatus.buildName = FbuildName;
+                        NavigationStatus.floorName = FfloorName;
+                        NavigationStatus.foundEvent = "panel";
                     }
                 }
             });
         });
     }
 
-    function w(e) {
-        e
-            ?
-            ($(".mash").hide(),
-                $(".floor_box").hide(),
-                console.info("由楼宇进入院区")) :
-            ($(".InfoToast").is(":hidden") && $(".floor_box").show() && console.info("由院区进入楼宇"));
+    /**
+     * 内外景切换返回函数
+     * @param e :boolean 是否为外景
+     */
+    function ChangedSceenType(e) {
+        e?($(".mash").hide(),
+            $(".floor_box").hide(),
+            console.info("由楼宇进入院区")) :($(".InfoToast").is(":hidden") && $(".floor_box").show() && console.info("由院区进入楼宇"));
     }
 
-    function S(e) {
+    /**
+     * 2/3D切换
+     * @param e 0/1
+     */
+    function ChangeDimType(e) {
         0 === e ? $(".two_d_btn a").text("3D") : $(".two_d_btn a").text("2D");
     }
 
-    function I(e) {
-        compass.style.webkitTransform = "rotate(" + e + "deg)";
+    /**
+     * 指南针控制
+     * @param e deg
+     */
+    function ActCompass(e) {
+        UIStatus.compass.style.webkitTransform = "rotate(" + e + "deg)";
     }
 
-    function k(e) {
+    /**
+     * 点击浮窗设置起点
+     * @param e 起点名称
+     */
+    function TipForSetDefault(e) {
         (function (e, t) {
             t = isNaN(t) ? 3e3 : t;
             var a = document.createElement("div");
@@ -2323,7 +2177,7 @@ $(function () {
                     id: $(".start_input input").attr("roomid"),
                     name: $(".start_input input").val()
                 };
-                mSetItem(defaultStart, JSON.stringify(e)), D("设置成功!", 500);
+                SetLocationItem(UIStatus.defaultStart, JSON.stringify(e)), CenterToastShow("设置成功!", 500);
             }),
                 (a.innerHTML = e),
                 (a.style.cssText =
@@ -2340,17 +2194,23 @@ $(function () {
         })('点此将<span style="color:#ff0000;">' + e + "</span>设置为默认起点", 3e3);
     }
 
-    function C(e, t, a) {
+    /**
+     * 点击地图返回事件,位置点信息返回
+     * @param e RoomID
+     * @param t RoomName
+     * @param a event
+     */
+    function ChooseSetPoint(e, t, a) {
         if (a == null) {
             $("choose-set-point").hide();
-            setStartPoint(e, t);
+            SetStartPoint(e, t);
         } else if (a == "panel") {
-            if (Posfault && lockFlag) {
+            if (PLocationStatus.posFault && SceneStatus.lockFlag) {
                 //UnlockScene();
             }
         } else {
             if ("" !== t) {
-                if (Posfault && lockFlag) {
+                if (PLocationStatus.posFault && SceneStatus.lockFlag) {
                     //UnlockScene();
                 }
                 if ($(".search_direction_box").is(":hidden")) {
@@ -2359,23 +2219,20 @@ $(function () {
                         $(".search-box").show();
                         Engine.g_pInstance.m_pProject.CloseNavBack();
                     }
-                    if (currentScene == "室外") {
-                        var post = currentScene;
+                    if (SceneStatus.currentScene == "室外") {
+                        var post = SceneStatus.currentScene;
                     } else {
                         var post =
-                            currentScene + " - " + $(".floor_box .current-active-floor").text();
+                            SceneStatus.currentScene + " - " + $(".floor_box .current-active-floor").text();
                     }
-                    hideNavAgain();
+                    HideNavAgain();
                     //$(".btn-exit-rollback").trigger("click"),
                     $(".choose-set-point .text").text(t),
                         $(".choose-set-point .post-text").text(post),
                         iconup(75);
                     $(".choose-set-point").show("fast");
-                    var i = {
-                        id: e,
-                        name: t
-                    };
-                    mSetItem("choose-set-point", JSON.stringify(i));
+                    var i = {id: e,name: t};
+                    SetLocationItem("choose-set-point", JSON.stringify(i));
                     if (MiaokitDC.DC.m_nCurWork == 0) {
                         SetCamera(Engine.g_pInstance.m_screenPos, 0, 0, 300);
                     } else {
@@ -2383,537 +2240,478 @@ $(function () {
                     }
                 } else {
                     if (a == "getloc") {
-                        setEndPoint(e, t);
+                        SetEndPoint(e, t);
                     } else if (a == "getstartloc") {
-                        setStartPoint(e, t);
-                    } else if (chooseStartFlag) {
-                        setStartPoint(e, t);
+                        SetStartPoint(e, t);
+                    } else if (NavigationStatus.chooseStartFlag) {
+                        SetStartPoint(e, t);
                     }
                 }
             }
         }
     }
 
-    function N() {
+    /**
+     * 点击地图返回事件（无位置点返回）
+     */
+    function HideSetPoint() {
         $(".choose-set-point").hide("fast");
         icondown();
     }
 
+    /**
+     * 未见使用
+     * @param e *
+     */
     function M(e) {
-        for (var t in ((oBeancons = e), e)) console.log(e[t]);
+        for (var t in ((UIStatus.oBeancons = e), e)) console.log(e[t]);
     }
     $(".floor_box ul").scroll(function () {
-        var e = $(this).children("li"),
-            t = 0,
-            a = 0,
-            i = 0;
-        $(this)
-            .children("li")
-            .each(function (e) {
-                $(this).hasClass("current-active-floor") && (i = e);
-            }),
-            $(this)
-                .children("li")
-                .each(function (s) {
-                    Math.abs($(this).position().top) < (2 * f) / 3 &&
-                        ($(this)
-                            .addClass("top")
-                            .siblings()
-                            .removeClass("top"),
-                            (a = (t = s) + 3),
-                            e
-                                .eq(a)
-                                .addClass("bottom")
-                                .siblings()
-                                .removeClass("bottom"),
-                            e
-                                .eq(t + 1)
-                                .siblings()
-                                .removeClass("middle"),
-                            e.eq(t + 1).addClass("middle"),
-                            e.eq(t + 2).addClass("middle"),
-                            i == t ?
-                                e
-                                    .eq(i)
-                                    .removeClass("top cmiddle cbottom")
-                                    .addClass("ctop")
-                                    .siblings()
-                                    .removeClass("ctop") :
-                                i == a ?
-                                    e
-                                        .eq(i)
-                                        .removeClass("bottom ctop cmiddle")
-                                        .addClass("cbottom")
-                                        .siblings()
-                                        .removeClass("cbottom") :
-                                    i < a &&
-                                    i > t &&
-                                    e
-                                        .eq(i)
-                                        .removeClass("middle ctop cbottom")
-                                        .addClass("cmiddle")
-                                        .siblings()
-                                        .removeClass("cmiddle"));
-                });
-    }),
-        $(".start_input input").live("click", function () {
-            (isStartInput = !0),
-                $("#pop-input-start input").attr("placeholder", "请输入起点"),
-                (cacheType = cache_start_point),
-                b();
-        }),
-        $(".end_input input").live("click", function () {
-            (isStartInput = !1),
-                $("#pop-input-start input").attr("placeholder", "请输入终点"),
-                (cacheType = cache_end_point),
-                b();
-        }),
-        $("#page-index .center-container input").live("click", function () {
-            (isStartInput = !1),
-                $("#pop-input-start input").attr("placeholder", "请输入终点"),
-                (cacheType = cache_end_point),
-                b();
-        }),
-        $("#search-cancel").live("click", function (e) {
-            e.preventDefault();
-            if (!Posfault) {
-                UnlockScene(),
-                    $(".lockScene").hide();
-            } else {
-                Posfault = false;
-                ToastHide();
-                console.log("Posfault = false");
+        var e = $(this).children("li"),t = 0,a = 0,i = 0;
+        $(this).children("li").each(function (e) {
+            $(this).hasClass("current-active-floor") && (i = e);
+        });
+        $(this).children("li").each(function (s) {
+            Math.abs($(this).position().top) < (2 * UIStatus.floorBoxInitHeight) / 3 &&
+                ($(this).addClass("top").siblings().removeClass("top"),
+                    (a = (t = s) + 3),
+                    e.eq(a).addClass("bottom").siblings().removeClass("bottom"),
+                    e.eq(t + 1).siblings().removeClass("middle"),
+                    e.eq(t + 1).addClass("middle"),
+                    e.eq(t + 2).addClass("middle"),
+                    i == t ?
+                    e.eq(i).removeClass("top cmiddle cbottom").addClass("ctop").siblings().removeClass("ctop") :
+                    i == a ?
+                    e.eq(i).removeClass("bottom ctop cmiddle").addClass("cbottom").siblings().removeClass("cbottom") :
+                    i < a &&i > t &&e.eq(i).removeClass("middle ctop cbottom").addClass("cmiddle").siblings().removeClass("cmiddle"));
+        });
+    });
+    $(".start_input input").on("click", function () {
+        (UIStatus.isStartInput = !0),
+            $("#pop-input-start input").attr("placeholder", "请输入起点"),
+            (UIStatus.cacheType = UIStatus.cacheStartPoint),
+            PopUpSearchUi();
+    });
+    $(".end_input input").on("click", function () {
+        (UIStatus.isStartInput = !1),
+            $("#pop-input-start input").attr("placeholder", "请输入终点"),
+            (UIStatus.cacheType = UIStatus.cacheEndPoint),
+            PopUpSearchUi();
+    });
+    $("#page-index .center-container input").on("click", function () {
+        (UIStatus.isStartInput = !1),
+            $("#pop-input-start input").attr("placeholder", "请输入终点"),
+            (UIStatus.cacheType = UIStatus.cacheEndPoint),
+            PopUpSearchUi();
+    });
+    $("#search-cancel").on("click", function (e) {
+        e.preventDefault();
+        if (!PLocationStatus.posFault) {
+            UnlockScene(),
+                $(".lockScene").hide();
+        } else {
+            PLocationStatus.posFault = false;
+            ToastHide();
+            console.log("PLocationStatus.posFault = false");
+        }
+        Engine.g_pInstance.m_pProject.CloseNavBack(),
+            $(".search_direction_box").hide();
+        $(".navigation_btn").hide();
+        icondown();
+    });
+    $(document).on("click", ".basePosition .base-item", function () {
+        var e = $(this).attr("sort-id");
+        $(".base-position-list").show(),
+            $.mobile.changePage("", {transition: "slide"}),
+            $(".search_direction_box").hide(),
+            $(".navigation_btn").hide(),
+            $.ajax({
+                type: "get",
+                url: SVE_H5_URL + "api/info/getBaseSortSelectH5.php?id=" + e,
+                success: function (e) {
+                    e?(function (e) {
+                            var t = "",
+                                a = JSON.parse(e).response;
+                            for (var i in a)
+                                (t +='<li room-id="' +a[i].Room_ID +'"><span class="ico_addr"></span><span class="context">' +a[i].Name +"</span>"),
+                                "string" == typeof a[i].Floor_ID &&"" != a[i].Floor_ID &&
+                                    (t +="<span class='floor-num'>" +a[i].Floor_ID +"</span>"),(t += "</li>");
+                            $(".base-position-list ul").html(t),
+                                $(".base-position-list ul").scrollTop(0);
+                        })(e) :console.info("请求数据出错.");
+                },
+                error: function (e) {
+                    console.warn("get base-roomid-list err: " + e);
+                }
+            });
+    });
+    $(document).on("click", ".base-position-list li", function () {
+        var e = $(this).attr("room-id"),
+            t = $(this)
+                .children(".context")
+                .html();
+        UIStatus.isStartInput?($(".start_input input").attr("roomid", e),$(".start_input input").val(t),TipForSetDefault(t)) :
+            SetEndPoint(e, t),
+            $(".base-position-list").hide(),
+            $(".search_direction_box").show(),
+            $(".navigation_btn").show();
+    });
+    $(document).on("click", ".panel-body span", function () {
+        var e = $(this).attr("roomid"),
+            t = $(this).html();
+        if ($(".search-box").is(":hidden")) {
+            $("#replanning").trigger("click");
+        }
+        UIStatus.isStartInput ? (SetStartPoint(e, t), TipForSetDefault(t)) : SetEndPoint(e, t),
+            $(".choose-set-point").hide("fast"),
+            $(".search_direction_box").show(),
+            $(".navigation_btn .search-nav-text").text("开始导航"),
+            $(".navigation_btn").show(),
+            $.mobile.changePage("", {
+                transition: "slide"
+            });
+    });
+    $(document).on("click", ".base-position-list p", function () {
+        $(".navigation_btn").show(), $(".base-position-list").hide();
+    });
+    $(document).on("click", ".panel-head", function () {
+        var e = $(this).parent().children(".panel-body"),
+            t = $(this),
+            a = $(this).children(".fold-icon").children("span");
+        a.hasClass("icon-chevron-thin-down") ?
+            a.removeClass("icon-chevron-thin-down").addClass("icon-chevron-thin-up") : a.removeClass("icon-chevron-thin-up").addClass("icon-chevron-thin-down"),
+            e.is(":visible") ?
+                (e.hide("fast"), t.css("border-bottom", "none")) :
+                (e.show("slow"), t.css("border-bottom", "1px solid #DDDDDD"));
+    });
+    $(".input-head .visual-input input").bind("input focus propertychange",function (e) {
+        $("#pop-input-start").addClass("list-bg"),
+            $(".input-head .visual-input .ico-qrcode").css("display", "none"),
+            $(".input-head .visual-input .ico-close").css("display", "none");
+        var t = $(this).val();
+        "" !== t &&
+            ($(".input-head .visual-input .ico-qrcode").css("display", "none"),
+                $(".input-head .visual-input .ico-close").css(
+                    "display",
+                    "inline-block"
+                )),
+            ("focus" != e.type && "input" != e.type) ||
+            (function (e) {
+                var t = new Date().valueOf();
+                if (
+                    "null" != JSON.stringify(GetLocationItem("keshi-list")) &&
+                    parseInt(GetLocationItem("keshi-list-time")) > t - SystemStatus.HttpCacheTime
+                ) {
+                    var a = GetLocationItem("keshi-list");
+                    ShowFilterList(a, e), console.info("读取科室列表缓存");
+                } else
+                    $.ajax({
+                        type: "get",
+                        url: SVE_H5_URL + "api/info/getKeShiSelectH5.php?keshi_name=",
+                        async: !0,
+                        success: function (t) {
+                            t
+                                ?
+                                (ShowFilterList(t, e),
+                                    SetLocationItem("keshi-list", t),
+                                    SetLocationItem("keshi-list-time", new Date().valueOf())) :
+                                console.info("请求数据出错.");
+                        },
+                        error: function () {
+                            console.warn("模糊请求查询科室数据出错.");
+                        }
+                    }),
+                        console.info("请求科室列表数据");
+            });
+    });
+    $(document).on("click", ".delete", function (e) {
+        var t = $(this)
+            .parent()
+            .attr("roomid");
+        if (window.confirm("确定删除此条记录?")) {
+            if (
+                ($(this).parent().remove(),
+                    (function (e, t) {
+                        var a = JSON.parse(GetLocationItem(e));
+                        for (var i in a) t === a[i].id && a.splice(i, 1);
+                        SetLocationItem(e, JSON.stringify(a));
+                    })(UIStatus.cacheType, t),
+                    CenterToastShow("删除成功", 1e3),
+                    $(".search-list .delete").length < 1)
+            ) {
+                var a = '<li class="input-history-li">历史记录</li>';
+                (a += '<li class="input-history-none">暂无历史数据</li>'),
+                    $(".search-list").html(a);
             }
-            Engine.g_pInstance.m_pProject.CloseNavBack(),
-                $(".search_direction_box").hide();
-            $(".navigation_btn").hide();
-            icondown();
-        }),
-        $(document).on("click", ".basePosition .base-item", function () {
-            var e = $(this).attr("sort-id");
-            $(".base-position-list").show(),
+        } else CenterToastShow("已取消删除操作", 1e3);
+        e.stopPropagation();
+    });
+    $(".input-head .visual-input .ico-close").on("click", function () {
+        $(".input-head .visual-input input").val(""), $(this).hide();
+        // var e = $(".input-head .visual-input input").val();
+        // e.length < 1 ? ($(this).hide(),
+        // $(".input-head .visual-input .ico-qrcode").css("display", "inline-block")) : (e = e.substr(0, e.length - 1),
+        // $(".input-head .visual-input input").val(e),
+        // e.length < 1 && ($(this).hide(),
+        // $(".input-head .visual-input .ico-qrcode").css("display", "inline-block")))
+    });
+    $("#pop-input-start .arrow-left").on("click", function () {
+        // $.mobile.changePage("", {
+        //     transition: "slide"
+        // })
+        history.back();
+    });
+    $(document).on("pagehide", "#pop-input-start", function () {
+        $(".input-head .visual-input input").val("");
+    });
+    $(".search-list .search-info").on("click", function () {
+        if (
+            $(this).hasClass("input-history-clear") ||
+            $(this).hasClass("input-history-li") ||
+            $(this).hasClass("input-history-none")
+        ) {
+            if (
+                $(this).hasClass("input-history-clear") &&
+                window.confirm("清除历史记录?")
+            ) {
+                SetLocationItem(UIStatus.cacheType, null);
+                var e = '<li class="input-history-li">历史记录</li>';
+                (e += '<li class="input-history-none">暂无历史数据</li>'),
+                    $(".search-list").html(e),
+                    CenterToastShow("已清除历史记录", 1e3);
+            }
+        } else
+            "请输入起点" === $("#pop-input-start input").attr("placeholder") ?
+                (TipForSetDefault(
+                    $(this)
+                        .children(".context")
+                        .text()
+                ),
+                    SetStartPoint($(this).attr("roomid"), $(this).children(".context").text())) :
+                (SetEndPoint($(this).attr("roomid"), $(this).children(".context").text())),
                 $.mobile.changePage("", {
                     transition: "slide"
-                }),
-                $(".search_direction_box").hide(),
-                $(".navigation_btn").hide(),
-                $.ajax({
-                    type: "get",
-                    url: SVE_H5_URL + "api/info/getBaseSortSelectH5.php?id=" + e,
-                    success: function (e) {
-                        e
-                            ?
-                            (function (e) {
-                                var t = "",
-                                    a = JSON.parse(e).response;
-                                for (var i in a)
-                                    (t +=
-                                        '<li room-id="' +
-                                        a[i].Room_ID +
-                                        '"><span class="ico_addr"></span><span class="context">' +
-                                        a[i].Name +
-                                        "</span>"),
-                                        "string" == typeof a[i].Floor_ID &&
-                                        "" != a[i].Floor_ID &&
-                                        (t +=
-                                            "<span class='floor-num'>" +
-                                            a[i].Floor_ID +
-                                            "</span>"),
-                                        (t += "</li>");
-                                $(".base-position-list ul").html(t),
-                                    $(".base-position-list ul").scrollTop(0);
-                            })(e) :
-                            console.info("请求数据出错.");
-                    },
-                    error: function (e) {
-                        console.warn("get base-roomid-list err: " + e);
-                    }
                 });
-        }),
-        $(document).on("click", ".base-position-list li", function () {
-            var e = $(this).attr("room-id"),
-                t = $(this)
-                    .children(".context")
-                    .html();
-            isStartInput
-                ?
-                ($(".start_input input").attr("roomid", e),
-                    $(".start_input input").val(t),
-                    k(t)) :
-                setEndPoint(e, t),
-                $(".base-position-list").hide(),
-                $(".search_direction_box").show(),
-                $(".navigation_btn").show();
-        }),
-        $(document).on("click", ".panel-body span", function () {
-            var e = $(this).attr("roomid"),
-                t = $(this).html();
-            if ($(".search-box").is(":hidden")) {
-                $("#replanning").trigger("click");
-            }
-            isStartInput ? (setStartPoint(e, t), k(t)) : setEndPoint(e, t),
-                $(".choose-set-point").hide("fast"),
+        if ($(".history-rollback-wrapper").is(":hidden")) {
+            $(".choose-set-point").hide("fast"),
                 $(".search_direction_box").show(),
                 $(".navigation_btn .search-nav-text").text("开始导航"),
-                $(".navigation_btn").show(),
-                $.mobile.changePage("", {
-                    transition: "slide"
-                });
-        }),
-        $(document).on("click", ".base-position-list p", function () {
-            $(".navigation_btn").show(), $(".base-position-list").hide();
-        }),
-        $(document).on("click", ".panel-head", function () {
-            var e = $(this).parent().children(".panel-body"),
-                t = $(this),
-                a = $(this).children(".fold-icon").children("span");
-            a.hasClass("icon-chevron-thin-down") ?
-                a.removeClass("icon-chevron-thin-down").addClass("icon-chevron-thin-up") : a.removeClass("icon-chevron-thin-up").addClass("icon-chevron-thin-down"),
-                e.is(":visible") ?
-                    (e.hide("fast"), t.css("border-bottom", "none")) :
-                    (e.show("slow"), t.css("border-bottom", "1px solid #DDDDDD"));
-        }),
-        $(".input-head .visual-input input").bind(
-            "input focus propertychange",
-            function (e) {
-                $("#pop-input-start").addClass("list-bg"),
-                    $(".input-head .visual-input .ico-qrcode").css("display", "none"),
-                    $(".input-head .visual-input .ico-close").css("display", "none");
-                var t = $(this).val();
-                "" !== t &&
-                    ($(".input-head .visual-input .ico-qrcode").css("display", "none"),
-                        $(".input-head .visual-input .ico-close").css(
-                            "display",
-                            "inline-block"
-                        )),
-                    ("focus" != e.type && "input" != e.type) ||
-                    (function (e) {
-                        var t = new Date().valueOf();
-                        if (
-                            "null" != JSON.stringify(mGetItem("keshi-list")) &&
-                            parseInt(mGetItem("keshi-list-time")) > t - http_cache_time
-                        ) {
-                            var a = mGetItem("keshi-list");
-                            x(a, e), console.info("读取科室列表缓存");
-                        } else
-                            $.ajax({
-                                type: "get",
-                                url: SVE_H5_URL + "api/info/getKeShiSelectH5.php?keshi_name=",
-                                async: !0,
-                                success: function (t) {
-                                    t
-                                        ?
-                                        (x(t, e),
-                                            mSetItem("keshi-list", t),
-                                            mSetItem("keshi-list-time", new Date().valueOf())) :
-                                        console.info("请求数据出错.");
-                                },
-                                error: function () {
-                                    console.warn("模糊请求查询科室数据出错.");
-                                }
-                            }),
-                                console.info("请求科室列表数据");
-                    })(t.trim());
+                // $(".navigation_btn").show(),
+                $("#pop-input-start input").val("");
+        }
+    });
+    $(".search-list").on("click", function () {
+        document.activeElement["blur"]();
+    });
+    $(".navigation_btn").on("click", function () {
+        var ntype = $(".search-path .path").index($(".search-path .active"));
+        if ($(".search_direction_box").is(":hidden")) {
+            $(".search_direction_box").show();
+            $(".choose-set-point").hide();
+            iconup($(".search_direction_box").height()), $(this).text("开始导航");
+            if ($(".start_input input").val() == "") {
+                CenterToastShow("未获取起点，请手动选择起点", 2220);
             }
-        ),
-        $(document).on("click", ".delete", function (e) {
-            var t = $(this)
-                .parent()
-                .attr("roomid");
-            if (window.confirm("确定删除此条记录?")) {
-                if (
-                    ($(this).parent().remove(),
-                        (function (e, t) {
-                            var a = JSON.parse(mGetItem(e));
-                            for (var i in a) t === a[i].id && a.splice(i, 1);
-                            mSetItem(e, JSON.stringify(a));
-                        })(cacheType, t),
-                        D("删除成功", 1e3),
-                        $(".search-list .delete").length < 1)
-                ) {
-                    var a = '<li class="input-history-li">历史记录</li>';
-                    (a += '<li class="input-history-none">暂无历史数据</li>'),
-                        $(".search-list").html(a);
+        } else {
+            if (0 && PLocationStatus.GPSTimer) {
+                $("#autostep").trigger("click");
+            } else {
+                UIStatus.audio[0].volume = 1;
+                var e = $(".start_input input").attr("roomid"), //获取startid
+                    t = ($(".start_input input").val(),
+                        $(".end_input input").attr("roomid")); //获取endid
+                $(".end_input input").val();
+                if ($(".start_input input").val() == "我的位置") {
+                    e = PLocationStatus.PLocation;
+                    console.log("e:" + e);
+                } else {
+                    console.log("start_input", $(".start_input input").val(), "e:", e);
                 }
-            } else D("已取消删除操作", 1e3);
-            e.stopPropagation();
-        }),
-        $(".input-head .visual-input .ico-close").live("click", function () {
-            $(".input-head .visual-input input").val(""), $(this).hide();
-            // var e = $(".input-head .visual-input input").val();
-            // e.length < 1 ? ($(this).hide(),
-            // $(".input-head .visual-input .ico-qrcode").css("display", "inline-block")) : (e = e.substr(0, e.length - 1),
-            // $(".input-head .visual-input input").val(e),
-            // e.length < 1 && ($(this).hide(),
-            // $(".input-head .visual-input .ico-qrcode").css("display", "inline-block")))
-        }),
-        $("#pop-input-start .arrow-left").live("click", function () {
-            // $.mobile.changePage("", {
-            //     transition: "slide"
-            // })
-            history.back();
-        }),
-        $(document).on("pagehide", "#pop-input-start", function () {
-            $(".input-head .visual-input input").val("");
-        }),
-        $(".search-list .search-info").live("click", function () {
-            if (
-                $(this).hasClass("input-history-clear") ||
-                $(this).hasClass("input-history-li") ||
-                $(this).hasClass("input-history-none")
-            ) {
-                if (
-                    $(this).hasClass("input-history-clear") &&
-                    window.confirm("清除历史记录?")
-                ) {
-                    mSetItem(cacheType, null);
-                    var e = '<li class="input-history-li">历史记录</li>';
-                    (e += '<li class="input-history-none">暂无历史数据</li>'),
-                        $(".search-list").html(e),
-                        D("已清除历史记录", 1e3);
-                }
-            } else
-                "请输入起点" === $("#pop-input-start input").attr("placeholder") ?
-                    (k(
-                        $(this)
-                            .children(".context")
-                            .text()
-                    ),
-                        setStartPoint($(this).attr("roomid"), $(this).children(".context").text())) :
-                    (setEndPoint($(this).attr("roomid"), $(this).children(".context").text())),
+                e && t ? //判断是否起点终点id均符合规范
+                    e != t ?
+                        ((UIStatus.isNowNavigating = !0),
+                            //Engine.g_pInstance.m_pProject.Navigate(e, t, 0),
+                            Navigation(e, t, ntype), //进行导航规划路线
+                            (PLocationStatus.endX = 0.0),
+                            (PLocationStatus.endY = 0.0),
+                            !UIStatus.isNavSuccess ?($(".navigation_btn").show(),(UIStatus.isNavSuccess = !0),CenterToastShow("无法找到当前线路.", 1500)) : console.log()) :
+                        (CenterToastShow("起点和终点相同！", 1500)) :
+                    CenterToastShow("请开启蓝牙或手动选择起点", 2220);
+            }
+        }
+    });
+    $(".btn-exit-rollback").on("click", function () {
+        (UIStatus.audio[0].volume = 0),
+            Engine.g_pInstance.m_pProject.CloseNavBack(),
+            ToastHide(),
+            $(".history-rollback-wrapper").css("display", "none");
+        if (!PLocationStatus.posFault) {
+            $(".lockScene").hide()
+        } else {
+            PLocationStatus.posFault = false;
+            console.log("PLocationStatus.posFault = false");
+        }
+        $(".floor-box-div").hide();
+    });
+    $("#left-slide li").on("click", function () {
+        if ((CloseLeftSide(), (UIStatus.isNavSuccess = !0), $(this).hasClass("work"))) {
+            var e = $(this).attr("data-id");
+            //Engine.g_pInstance.m_pProject.SwitchWork(e),
+            SwitchScene(e);
+        }
+        $(this).hasClass("exterior") &&
+            SwitchScene(null) /*Engine.g_pInstance.m_pProject.GoOutWork()*/,
+            $(this).siblings().removeClass("active"),
+            $(this).addClass("active");
+    });
+    $(".mash").on("touchstart", function () {
+        CloseLeftSide(), ClosePartSide(), CloseModelSide();
+    });
+    $(".two_d_btn a").on("click", function () {
+        "2D" === $(this).text() ? SwitchView(2) /*Engine.g_pInstance.m_pProject.SwitchViewMode(ViewMode.View2D)*/ : SwitchView(3); /* Engine.g_pInstance.m_pProject.SwitchViewMode(ViewMode.View3D)*/
+    });
+    $(".reset").on("click", function () {
+        let pViewState = MiaokitDC.DC.GetWork(MiaokitDC.DC.m_nCurWork).m_pEyejiaDC.m_pLayerMgr.GetLayer(ALinerDC.DC.m_pLayerMgr.m_pActiveLayer.m_nIndex).m_pViewState;
+        if (pViewState != null) {
+            Engine.g_pInstance.SetViewState(pViewState);
+        }
+    });
+    $(".two_code_btn").on("click", function () {
+        wx.scanQRCode({
+            needResult: 1,
+            desc: "scanQRCode desc",
+            success: function (e) {
+                if (e) {
+                    if (e.resultStr) {
+                        var t = JSON.parse(e.resultStr);
+                        $(".start_input input").attr("roomid", t.Room_ID),
+                            $(".start_input input").val(t.Name);
+                    }
                     $.mobile.changePage("", {
                         transition: "slide"
-                    });
-            if ($(".history-rollback-wrapper").is(":hidden")) {
-                $(".choose-set-point").hide("fast"),
-                    $(".search_direction_box").show(),
-                    $(".navigation_btn .search-nav-text").text("开始导航"),
-                    // $(".navigation_btn").show(),
-                    $("#pop-input-start input").val("");
-            }
-        }),
-        $(".search-list").live("click", function () {
-            document.activeElement["blur"]();
-        }),
-        $(".navigation_btn").live("click", function () {
-            var ntype = $(".search-path .path").index($(".search-path .active"));
-            if ($(".search_direction_box").is(":hidden")) {
-                $(".search_direction_box").show();
-                $(".choose-set-point").hide();
-                iconup($(".search_direction_box").height()), $(this).text("开始导航");
-                if ($(".start_input input").val() == "") {
-                    D("未获取起点，请手动选择起点", 2220);
-                }
-            } else {
-                if (0 && GPSTimer) {
-                    $("#autostep").trigger("click");
-                } else {
-                    audio.volume = 1;
-                    var e = $(".start_input input").attr("roomid"), //获取startid
-                        t = ($(".start_input input").val(),
-                            $(".end_input input").attr("roomid")); //获取endid
-                    $(".end_input input").val();
-                    if ($(".start_input input").val() == "我的位置") {
-                        e = PLocation;
-                        console.log("e:" + e);
-                    } else {
-                        console.log("start_input", $(".start_input input").val(), "e:", e);
-                    }
-                    e && t ? //判断是否起点终点id均符合规范
-                        e != t ?
-                            ((isNowNavigating = !0),
-                                //Engine.g_pInstance.m_pProject.Navigate(e, t, 0),
-                                navigation(e, t, ntype), //进行导航规划路线
-                                (endX = 0.0),
-                                (endY = 0.0),
-                                !isNavSuccess ?
-                                    ($(".navigation_btn").show(),
-                                        (isNavSuccess = !0),
-                                        D("无法找到当前线路.", 1500)) : console.log()) :
-                            (D("起点和终点相同！", 1500)) :
-                        D("请开启蓝牙或手动选择起点", 2220);
-                }
-            }
-        }),
-        $(".btn-exit-rollback").live("click", function () {
-            (audio.volume = 0),
-                Engine.g_pInstance.m_pProject.CloseNavBack(),
-                ToastHide(),
-                $(".history-rollback-wrapper").css("display", "none");
-            if (!Posfault) {
-                $(".lockScene").hide()
-            } else {
-                Posfault = false;
-                console.log("Posfault = false");
-            }
-            $(".floor-box-div").hide();
-        }),
-        $("#left-slide li").live("click", function () {
-            if ((closeLeftSide(), (isNavSuccess = !0), $(this).hasClass("work"))) {
-                var e = $(this).attr("data-id");
-                //Engine.g_pInstance.m_pProject.SwitchWork(e),
-                SwitchScene(e);
-            }
-            $(this).hasClass("exterior") &&
-                SwitchScene(null) /*Engine.g_pInstance.m_pProject.GoOutWork()*/,
-                $(this).siblings().removeClass("active"),
-                $(this).addClass("active");
-        }),
-        $(".mash").live("touchstart", function () {
-            closeLeftSide(), closePartSide(), closeModelSide();
-        }),
-        $(".two_d_btn a").live("click", function () {
-            "2D" === $(this).text() ? SwitchView(2) /*Engine.g_pInstance.m_pProject.SwitchViewMode(ViewMode.View2D)*/ : SwitchView(3); /* Engine.g_pInstance.m_pProject.SwitchViewMode(ViewMode.View3D)*/
-        }),
-        $(".reset").live("click", function () {
-            let pViewState = MiaokitDC.DC.GetWork(MiaokitDC.DC.m_nCurWork).m_pEyejiaDC.m_pLayerMgr.GetLayer(ALinerDC.DC.m_pLayerMgr.m_pActiveLayer.m_nIndex).m_pViewState;
-            if (pViewState != null) {
-                Engine.g_pInstance.SetViewState(pViewState);
-            }
-        }),
-        $(".two_code_btn").live("click", function () {
-            wx.scanQRCode({
-                needResult: 1,
-                desc: "scanQRCode desc",
-                success: function (e) {
-                    if (e) {
-                        if (e.resultStr) {
-                            var t = JSON.parse(e.resultStr);
-                            $(".start_input input").attr("roomid", t.Room_ID),
-                                $(".start_input input").val(t.Name);
-                        }
-                        $.mobile.changePage("", {
-                            transition: "slide"
-                        }),
-                            $("#pop-input-start input").val("");
-                    } else console.info("请求数据出错.");
-                }
-            });
-        }),
-        $(".input-head .visual-input .ico-qrcode").live("click", function () {
-            wx.scanQRCode({
-                needResult: 1,
-                desc: "scanQRCode desc",
-                success: function (e) {
-                    if (e) {
-                        if (e.resultStr) {
-                            var t = JSON.parse(e.resultStr);
-                            $(".start_input input").attr("roomid", t.Room_ID),
-                                $(".start_input input").val(t.Name);
-                        }
-                        $.mobile.changePage("", {
-                            transition: "slide"
-                        }),
-                            $("#pop-input-start input").val("");
-                    } else console.info("请求数据出错.");
-                }
-            });
-        }),
-        $(".history-rollback-wrapper ul li").live("click", function (e, t) {
-            if (
-                ((audio.volume = 1),
-                    $(this)
-                        .addClass("item-active")
-                        .siblings()
-                        .removeClass("item-active"),
-                    void 0 == t)
-            ) {
-                var a = new NavBackData(
-                    $(this).attr("house-id"),
-                    $(this).attr("p-id"),
-                    $(this).attr("layer-id")
-                );
-                Engine.g_pInstance.m_pProject.NavBack(a, $(this).index()),
-                    (isNowNavigating = !1);
-                if (NNavigation.g_pActiveList.length > 0 && lockFlag)
-                    SetCamera(new Vector3(0.0, 0.0, 0.0), undefined, undefined, 20)
-                console.info("history-rollback-wrapper needActive layer");
-            } else if ("noNeedActive" == t.type) {
-                if (
-                    ($(".floor_box ul li").eq(parseInt($(this).attr("layer-id"))).trigger("click", {
-                        type: "noNeedActive"
                     }),
-                        isNowNavigating)
-                ) {
-                    var i = $(".history-rollback-wrapper ul li").eq(0).width();
-                    $(".history-rollback-wrapper ul").scrollLeft($(this).index() * i);
-                }
-                console.info("history-rollback-wrapper noNeedActive layer");
+                        $("#pop-input-start input").val("");
+                } else console.info("请求数据出错.");
             }
-        }),
-        $("#page-expert-detail .department-msg .go-ahead").live(
-            "click",
-            function () {
-                var e = $(this).attr("room-id");
-                $(".end_input input").attr("roomid", e),
-                    $(".start_input input").attr("roomid") ?
-                        ($.mobile.changePage("", {
-                            transition: "slide"
-                        }),
-                            reSetNavIcon("index"),
-                            $(".history-rollback-wrapper").css("display", "none"),
-                            $(".navigation_btn").show(),
-                            $(".search_direction_box").show(),
-                            iconup($(".search_direction_box").height()),
-                            $(".btn-exit-rollback").trigger("click"),
-                            $(".navigation_btn").trigger("click")) :
-                        alert("请先到导航页输入起点位置.");
-            }
-        ),
-        $(document).on(
-            "click",
-            "#page-self-service-rusult .self-go-ahead",
-            function () {
-                var e = $(this).attr("dataid"),
-                    t = $("#page-self-service-rusult .room-name").html();
-                setEndPoint(e, t),
-                    $(".start_input input").attr("roomid") ?
-                        ($.mobile.changePage("", {
-                            transition: "slide"
-                        }),
-                            reSetNavIcon("index"),
-                            $(".history-rollback-wrapper").css("display", "none"),
-                            $(".navigation_btn").show(),
-                            $(".search_direction_box").show(),
-                            iconup($(".search_direction_box").height()),
-                            $(".btn-exit-rollback").trigger("click"),
-                            $(".navigation_btn").trigger("click")) :
-                        alert("请先到导航页输入起点位置.");
-            }
-        ),
-        $(".choose-set-point li .set").click(function () {
-            var e = $(this).attr("type"),
-                t = JSON.parse(mGetItem("choose-set-point"));
-            switch (e) {
-                case "start":
-                    setStartPoint(t.id, t.name), $(".search_direction_box").show();
-                    break;
-                case "end":
-                    let posarray = $(".post-text").text().split(" - ");
-                    $(".start_input input").attr("roomid") != t.id ?
-                        (
-                            $("#start_position").val(""),
-                            $("#start_position").attr("roomid", ""),
-                            $("#start-build").text(""),
-                            $("#start-floor").text(""),
-                            setEndPoint(t.id, t.name),
-                            $(".navigation_btn").show("fast"),
-                            $("#end-build").text(posarray[0]),
-                            $("#end-floor").text(posarray[1]),
-                            $(".search_direction_box").show(),
-                            $(".search-box").show()
-                        )
-                        /**$(".navigation_btn").trigger("click")*/
-                        :
-                        D("起点和终点相同！", 1500);
-                    break;
-                default:
-                    $(".search_direction_box").hide(), icondown();
-            }
-            $(".choose-set-point").hide();
-        }),
-        $(".bottom_menu ul li a").live("click", function () {
-            $(".choose-set-point").hide();
-            icondown();
         });
+    });
+    $(".input-head .visual-input .ico-qrcode").on("click", function () {
+        wx.scanQRCode({
+            needResult: 1,
+            desc: "scanQRCode desc",
+            success: function (e) {
+                if (e) {
+                    if (e.resultStr) {
+                        var t = JSON.parse(e.resultStr);
+                        $(".start_input input").attr("roomid", t.Room_ID),
+                            $(".start_input input").val(t.Name);
+                    }
+                    $.mobile.changePage("", {
+                        transition: "slide"
+                    }),
+                        $("#pop-input-start input").val("");
+                } else console.info("请求数据出错.");
+            }
+        });
+    });
+    $(".history-rollback-wrapper ul li").on("click", function (e, t) {
+        if (
+            ((UIStatus.audio[0].volume = 1),
+                $(this)
+                    .addClass("item-active")
+                    .siblings()
+                    .removeClass("item-active"),
+                void 0 == t)
+        ) {
+            var a = new NavBackData(
+                $(this).attr("house-id"),
+                $(this).attr("p-id"),
+                $(this).attr("layer-id")
+            );
+            Engine.g_pInstance.m_pProject.NavBack(a, $(this).index()),
+                (UIStatus.isNowNavigating = !1);
+            if (NNavigation.g_pActiveList.length > 0 && SceneStatus.lockFlag)
+                SetCamera(new Vector3(0.0, 0.0, 0.0), undefined, undefined, 20)
+            console.info("history-rollback-wrapper needActive layer");
+        } else if ("noNeedActive" == t.type) {
+            if (
+                ($(".floor_box ul li").eq(parseInt($(this).attr("layer-id"))).trigger("click", {
+                    type: "noNeedActive"
+                }),
+                    UIStatus.isNowNavigating)
+            ) {
+                var i = $(".history-rollback-wrapper ul li").eq(0).width();
+                $(".history-rollback-wrapper ul").scrollLeft($(this).index() * i);
+            }
+            console.info("history-rollback-wrapper noNeedActive layer");
+        }
+    });
+    $("#page-expert-detail .department-msg .go-ahead").on("click",function () {
+            var e = $(this).attr("room-id");
+            $(".end_input input").attr("roomid", e),
+                $(".start_input input").attr("roomid") ?
+                    ($.mobile.changePage("", {
+                        transition: "slide"
+                    }),
+                        ResetNavIcon("index"),
+                        $(".history-rollback-wrapper").css("display", "none"),
+                        $(".navigation_btn").show(),
+                        $(".search_direction_box").show(),
+                        iconup($(".search_direction_box").height()),
+                        $(".btn-exit-rollback").trigger("click"),
+                        $(".navigation_btn").trigger("click")) :
+                    alert("请先到导航页输入起点位置.");
+    });
+    $(document).on("click","#page-self-service-rusult .self-go-ahead",function () {
+            var e = $(this).attr("dataid"),
+                t = $("#page-self-service-rusult .room-name").html();
+            SetEndPoint(e, t),
+                $(".start_input input").attr("roomid") ?
+                    ($.mobile.changePage("", {
+                        transition: "slide"
+                    }),
+                        ResetNavIcon("index"),
+                        $(".history-rollback-wrapper").css("display", "none"),
+                        $(".navigation_btn").show(),
+                        $(".search_direction_box").show(),
+                        iconup($(".search_direction_box").height()),
+                        $(".btn-exit-rollback").trigger("click"),
+                        $(".navigation_btn").trigger("click")) :
+                    alert("请先到导航页输入起点位置.");
+    });
+    $(".choose-set-point li .set").click(function () {
+        var e = $(this).attr("type"),
+            t = JSON.parse(GetLocationItem("choose-set-point"));
+        switch (e) {
+            case "start":
+                SetStartPoint(t.id, t.name), $(".search_direction_box").show();
+                break;
+            case "end":
+                let posarray = $(".post-text").text().split(" - ");
+                $(".start_input input").attr("roomid") != t.id ?
+                    (
+                        $("#start_position").val(""),
+                        $("#start_position").attr("roomid", ""),
+                        $("#start-build").text(""),
+                        $("#start-floor").text(""),
+                        SetEndPoint(t.id, t.name),
+                        $(".navigation_btn").show("fast"),
+                        $("#end-build").text(posarray[0]),
+                        $("#end-floor").text(posarray[1]),
+                        $(".search_direction_box").show(),
+                        $(".search-box").show()
+                    )
+                    /**$(".navigation_btn").trigger("click")*/
+                    :
+                    CenterToastShow("起点和终点相同！", 1500);
+                break;
+            default:
+                $(".search_direction_box").hide(), icondown();
+        }
+        $(".choose-set-point").hide();
+    });
+    $(".bottom_menu ul li a").on("click", function () {
+        $(".choose-set-point").hide();
+        icondown();
+    });
 });
