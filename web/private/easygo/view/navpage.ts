@@ -3,20 +3,19 @@
 $(function () {
 
     /**判断是否选择起点 */
-    var isStart = false;
     $('.start_input a').click(function () {
-        isStart = true;
+        UIStatus.isStartInput = true;
     });
 
     $('#page-index .center-container .a-btn').click(function () {
-        isStart = false;
+        UIStatus.isStartInput = false;
     });
 
     $('#page-index .end_input').click(function () {
-        isStart = false;
+        UIStatus.isStartInput = false;
     });
     $(document).on('pagebeforeshow', "#page-index-new", function (e) {
-        if (isStart) {
+        if (UIStatus.isStartInput) {
             $('#page-index-new .center-container input').attr('placeholder', '请输入起始点');
         } else {
             $('#page-index-new .center-container input').attr('placeholder', '请输入目的地');
@@ -44,7 +43,7 @@ $(function () {
             } else {
                 var text = $(this).find('span').text();
             }
-            if (isStart == true) {
+            if (UIStatus.isStartInput == true) {
                 $('#start_position').trigger('click');
             } else {
                 $('#end_position').trigger('click');
@@ -56,7 +55,7 @@ $(function () {
         });
     });
     $('#new-search').click(function () {
-        if (isStart) {
+        if (UIStatus.isStartInput) {
             $('#start_position').trigger('click');
         } else {
             $('#end_position').trigger('click');
@@ -78,9 +77,9 @@ $(function () {
 
     $(document).on('pageinit', '#page-index-new', function (e) {
         var t = new Date().valueOf();
-        "null" != JSON.stringify(mGetItem("page-index-new")) &&
-            parseInt(mGetItem("page-index-new-time")) > t - http_cache_time ?
-            (renderHospitalRoom(mGetItem("page-index-new")),
+        "null" != JSON.stringify(GetLocationItem("page-index-new")) &&
+            parseInt(GetLocationItem("page-index-new-time")) > t - SystemStatus.HttpCacheTime ?
+            (renderHospitalRoom(GetLocationItem("page-index-new")),
                 $('#left-slide-new .work').first().trigger('click'),
                 console.info("读取医院信息缓存")) :
             ($.ajax({
@@ -90,8 +89,8 @@ $(function () {
                 success: function (data) {
                     if (data) {
                         renderHospitalRoom(data);
-                        mSetItem("page-index-new", data);
-                        mSetItem("page-index-new-time", new Date().valueOf());
+                        SetLocationItem("page-index-new", data);
+                        SetLocationItem("page-index-new-time", new Date().valueOf());
                     } else {
                         console.info('请求数据出错.');
                     }
@@ -197,7 +196,7 @@ $(function () {
                 let event = null;
 
                 FfloorName = reg.exec(FfloorName) + "F";
-                if (isStart) {
+                if (UIStatus.isStartInput) {
                     event = "getstartloc";
                 } else {
                     event = "getloc";
@@ -205,28 +204,19 @@ $(function () {
                 if (MiaokitDC.DC.m_pNavigator.m_pSiteList != null) {
                     findSta($(this).attr('data-roomid'), FbuildName, FfloorName, event);
                 } else {
-                    Froomloc = $(this).attr('data-roomid');
-                    buildName = FbuildName;
-                    floorName = FfloorName;
-                    Fevent = event;
+                    NavigationStatus.toRoomid = $(this).attr('data-roomid');
+                    NavigationStatus.buildName = FbuildName;
+                    NavigationStatus.floorName = FfloorName;
+                    NavigationStatus.foundEvent = event;
                 }
             });
         });
-        // $(document).bind('pagehide','page-index-new', function(){
-        //     $(".a-box .add-list h3").eq(0).trigger('click');
-        // });
-        // $(document).on('pagebeforehide', '#page-index-new', function () {
-        //     if ($(".adds").eq(0).css("visibility") == "visible") {
-        //         var FH = $(".a-box .add-list .adds").eq(0).height();
-        //         $(".a-box .add-list").eq(0).css('height', FH + 45 + 'px');
-        //     }
-        // });
     }
 
     $('.choose-set-point .close-choose').bind('click', function () {
         $('.choose-set-point').hide();
         icondown();
-        if (Posfault) {
+        if (PLocationStatus.posFault) {
             LockScene();
         }
     });
@@ -262,10 +252,10 @@ $(function () {
 });
 
 function findSta(loc, b, f, e) {
-    if (Posfault) {
-        Froomloc = "";
-        buildName = "";
-        floorName = "";
+    if (PLocationStatus.posFault) {
+        NavigationStatus.toRoomid = "";
+        NavigationStatus.buildName = "";
+        NavigationStatus.floorName = "";
         let time = 500;
         if (GLOBAL.Navigating) {
             $("#replanning").trigger("click");
