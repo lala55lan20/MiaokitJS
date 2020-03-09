@@ -10,7 +10,6 @@ declare var AMap: any;
 ///<script src="./common/lazy-load-img.min.js"></script>
 declare var LazyLoadImg: any;
 
-
 class Vector3 {
     /// 三维向量构造函数。
     public constructor(x: number, y: number, z: number) {
@@ -417,12 +416,12 @@ function SwitchScene(pName) {
         pName = "A栋"; // TODO
 
         MiaokitJS.App.m_pProject.SwitchScene(pName);
-        currentScene = pName;
+        SceneStatus.currentScene = pName;
         GLOBAL.pCurBuilding = MiaokitJS.App.m_pProject.m_pCurScene;
     }
     else {        
         MiaokitJS.App.m_pProject.SwitchScene(pName);
-        currentScene = "室外";
+        SceneStatus.currentScene = "室外";
         GLOBAL.pCurBuilding = null;
     }
     
